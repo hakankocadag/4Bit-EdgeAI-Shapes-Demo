@@ -31,13 +31,6 @@ module tb_brute_force;
         forever #10 clk = ~clk;
     end
 
-    integer neuron_count = 0;
-    always @(posedge clk) begin
-        if (output_valid) begin
-            neuron_count = neuron_count + 1;
-        end
-    end
-
     reg [8*64:1] filename;
     reg [1:0] expected_class;
     integer i;
@@ -59,7 +52,6 @@ module tb_brute_force;
         $display("==================================================\n");
 
         for (i = 1; i <= 6; i = i + 1) begin
-            neuron_count = 0;
             $sformat(filename, "test_%0d.hex", i);
             $readmemh(filename, uut.act_mem.mem_array);
 

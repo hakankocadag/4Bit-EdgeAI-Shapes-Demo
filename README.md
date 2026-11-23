@@ -55,8 +55,7 @@ At a **50 MHz** clock (`20 ns` period), a complete 3-neuron inference finishes i
 | Signal | Direction | Width | Description |
 | :--- | :---: | :---: | :--- |
 | `clk`, `rst_n`, `start` | `input` | `1` bit each | Clock, async active-low reset, inference start control |
-| `current_act_index` | `input` | `16` bits (`[15:0]`) | Zero-extended `act_addr[9:0]` from `agu`; triggers end-of-vector at `783` |
-| `current_neuron_index` | `input` | `16` bits (`[15:0]`) | Legacy port retained for interface compatibility (unused internally) |
+| `current_act_index` | `input` | `10` bits (`[9:0]`) | `act_addr[9:0]` from `agu`; triggers end-of-vector at `783` |
 | `mem_en` | `output` | `1` bit | Synchronous read enable for `weight_mem` and `act_mem` |
 | `mac_en` | `output` | `1` bit | Accumulate enable for `mac_unit` |
 | `acc_clr` | `output` | `1` bit | Synchronous accumulator clear (held high in `S_IDLE` and `S_OUTPUT`) |
@@ -65,7 +64,7 @@ At a **50 MHz** clock (`20 ns` period), a complete 3-neuron inference finishes i
 | `relu_en` | `output` | `1` bit | Latches `max(0, mac_out + bias)` in `relu_unit` |
 | `output_valid` | `output` | `1` bit | Signals `argmax_unit` and external observers that `final_result` is valid |
 | `done` | `output` | `1` bit | Asserted when all `NUM_NEURONS` scores are complete |
-| `neuron_count` | `output` | `16` bits (`[15:0]`) | Internal neuron counter (`0, 1, 2`); lower bits `[1:0]` index `bias_mem` |
+| `neuron_count` | `output` | `2` bits (`[1:0]`) | Internal neuron counter (`0, 1, 2`) indexing `bias_mem` |
 
 ### 1.4 Internal Datapath Buses & Memories
 
@@ -258,7 +257,7 @@ The accelerator separates the **Control Plane** (`control_fsm` + `agu`) from the
 ├── 1_Chip_RTL/                    # Synthesizable Verilog-2001 RTL
 │   ├── top_accelerator.v          # Top-level integration + 24-bit bias adder
 │   ├── control_fsm.v              # 6-state One-Hot Moore FSM
-│   ├── agu.v                      # Address Generation Unit
+│   ├── agu.v                      # Address Generation Unit for activation and weight memories
 │   ├── mac_unit.v                 # 4b x 4b signed multiplier + 24b saturating accumulator
 │   ├── relu_unit.v                # MUX-based 24-bit ReLU unit
 │   ├── argmax_unit.v              # Sequential comparator (zero-cycle lag on done)

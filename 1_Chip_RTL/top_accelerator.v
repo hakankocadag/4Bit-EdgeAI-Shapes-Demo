@@ -23,20 +23,20 @@ module top_accelerator #(
     wire mem_en, mac_en, acc_clr, agu_inc, agu_clr, relu_en;
     wire [ACT_ADDR_WIDTH-1:0] act_addr;
     wire [WEIGHT_ADDR_WIDTH-1:0] weight_addr;
-    wire [NEURON_ADDR_WIDTH-1:0] neuron_addr;
     wire [DATA_WIDTH-1:0] weight_data, act_data;
     wire [ACC_WIDTH-1:0] mac_out;
 
     // Neuron counter from FSM (used for bias addressing)
-    wire [15:0] neuron_count;
+    wire [NEURON_ADDR_WIDTH-1:0] neuron_count;
 
     control_fsm #(
         .VECTOR_LENGTH(VECTOR_LENGTH),
-        .NUM_NEURONS(NUM_NEURONS)
+        .NUM_NEURONS(NUM_NEURONS),
+        .ACT_ADDR_WIDTH(ACT_ADDR_WIDTH),
+        .NEURON_ADDR_WIDTH(NEURON_ADDR_WIDTH)
     ) fsm_inst (
         .clk(clk), .rst_n(rst_n), .start(start),
-        .current_act_index({ {(16-ACT_ADDR_WIDTH){1'b0}}, act_addr }),
-        .current_neuron_index({ {(16-NEURON_ADDR_WIDTH){1'b0}}, neuron_addr }),
+        .current_act_index(act_addr),
         .mem_en(mem_en), .mac_en(mac_en), .acc_clr(acc_clr),
         .agu_inc(agu_inc), .agu_clr(agu_clr), .relu_en(relu_en),
         .output_valid(output_valid), .done(done),
@@ -44,11 +44,12 @@ module top_accelerator #(
     );
 
     agu #(
-        .ACT_ADDR_WIDTH(ACT_ADDR_WIDTH), .WEIGHT_ADDR_WIDTH(WEIGHT_ADDR_WIDTH),
-        .NEURON_ADDR_WIDTH(NEURON_ADDR_WIDTH), .VECTOR_LENGTH(VECTOR_LENGTH), .NUM_NEURONS(NUM_NEURONS)
+        .ACT_ADDR_WIDTH(ACT_ADDR_WIDTH),
+        .WEIGHT_ADDR_WIDTH(WEIGHT_ADDR_WIDTH),
+        .VECTOR_LENGTH(VECTOR_LENGTH)
     ) agu_inst (
         .clk(clk), .rst_n(rst_n), .agu_clr(agu_clr), .agu_inc(agu_inc),
-        .act_addr(act_addr), .weight_addr(weight_addr), .neuron_addr(neuron_addr)
+        .act_addr(act_addr), .weight_addr(weight_addr)
     );
 
     memory_block #(
@@ -81,7 +82,7 @@ module top_accelerator #(
     end
 
     // Read bias for the active neuron counter (combinational)
-    wire signed [ACC_WIDTH-1:0] current_bias = bias_mem[neuron_count[NEURON_ADDR_WIDTH-1:0]];
+    wire signed [ACC_WIDTH-1:0] current_bias = bias_mem[neuron_count];
 
     // Add bias to MAC output: z = (W * x) + b
     wire signed [ACC_WIDTH-1:0] mac_plus_bias = $signed(mac_out) + current_bias;

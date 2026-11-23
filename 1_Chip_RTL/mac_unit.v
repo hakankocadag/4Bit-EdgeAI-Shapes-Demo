@@ -9,7 +9,7 @@ module mac_unit #(
  input wire acc_clr, // Synchronous clear for new inference
  input wire [IN_WIDTH-1:0] weight, // 4-bit input from Weight ROM
  input wire [IN_WIDTH-1:0] activation, // 4-bit input from Activation RAM
- output reg [ACC_WIDTH-1:0] mac_out // 16-bit safe accumulation
+ output reg [ACC_WIDTH-1:0] mac_out // ACC_WIDTH-bit saturating accumulation
 );
  // Internal wires for bit-width expansion and signed logic
  wire signed [IN_WIDTH-1:0] signed_w;
@@ -31,8 +31,8 @@ module mac_unit #(
  wire pos_overflow = (~mac_out[ACC_WIDTH-1]) & (~ext_product[ACC_WIDTH-1]) & sum[ACC_WIDTH-1];
  wire neg_overflow = mac_out[ACC_WIDTH-1] & ext_product[ACC_WIDTH-1] & (~sum[ACC_WIDTH-1]);
 
- wire signed [ACC_WIDTH-1:0] MAX_POS = {1'b0, {(ACC_WIDTH-1){1'b1}}};
- wire signed [ACC_WIDTH-1:0] MAX_NEG = {1'b1, {(ACC_WIDTH-1){1'b0}}};
+ localparam signed [ACC_WIDTH-1:0] MAX_POS = {1'b0, {(ACC_WIDTH-1){1'b1}}};
+ localparam signed [ACC_WIDTH-1:0] MAX_NEG = {1'b1, {(ACC_WIDTH-1){1'b0}}};
 
  // Sequential logic for the Accumulator Register
  always @(posedge clk or negedge rst_n) begin
