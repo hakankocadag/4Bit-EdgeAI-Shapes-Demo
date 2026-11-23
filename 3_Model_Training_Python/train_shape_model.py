@@ -9,8 +9,8 @@
   2. Trains a single-layer linear classifier: y = W * x + b
   3. Quantizes weights to 4-bit signed ([-8, +7]) and biases to 24-bit signed
   4. Runs a bit-exact hardware Golden Model check (ReLU + Argmax)
-  5. Writes weights.hex, biases.hex, acts.hex, and test_1..test_6.hex to
-     2_Simulation/ and saves 28x28 PNG visualizations
+  5. Writes weights.hex, biases.hex, acts.hex, and 6 descriptive test_*.hex
+     vectors to 2_Simulation/ and saves 28x28 PNG visualizations
 =============================================================================
 """
 from pathlib import Path
@@ -221,14 +221,14 @@ W_q = np.clip(np.round(W * W_scale), -8, 7).astype(int)
 
 max_bias = (1 << (ACC_WIDTH - 1)) - 1
 min_bias = -(1 << (ACC_WIDTH - 1))
-b_q = np.clip(np.round(b * W_scale).astype(int), min_bias, max_bias)
+b_q = np.clip(np.round(b * W_scale), min_bias, max_bias).astype(int)
 
 print(f"  Weight scale (W_scale): {W_scale:.6f}")
 
 
 def hw_forward(x_q_batch):
-    """Bit-exact hardware forward pass: MAC + Bias -> ReLU -> Argmax."""
-    raw = x_q_batch @ W_q.T + b_q
+    """Bit-exact hardware forward pass: MAC + Bias (24-bit sat) -> ReLU -> Argmax."""
+    raw = np.clip(x_q_batch @ W_q.T + b_q, min_bias, max_bias)
     relu = np.maximum(0, raw)
     preds = np.argmax(relu, axis=1)
     return raw, relu, preds
@@ -286,22 +286,22 @@ print(f"  acts.hex   : {VECTOR_LENGTH} pixels (4-bit) -- Default test: Corrupted
 
 
 # ============================================================================
-# SECTION 6: Golden Model Verification & 6 Test Scenarios (test_1..test_6.hex)
+# SECTION 6: Golden Model Verification & 6 Test Scenarios
 # ============================================================================
 print("\n=== GOLDEN MODEL VERIFICATION (ReLU + Argmax) ===")
 
 test_scenarios = [
-    ("Clean Square", 0, generate_square(noise_std=0.0, dropout_prob=0.0, shift=(0.0, 0.0), half_side=8.5, amp=1.0)),
-    ("Clean Triangle", 1, generate_triangle(noise_std=0.0, dropout_prob=0.0, shift=(0.0, 0.0), half_h=9.0, half_w=9.0, amp=1.0)),
-    ("Clean Circle", 2, generate_circle(noise_std=0.0, dropout_prob=0.0, shift=(0.0, 0.0), radius=9.0, amp=1.0)),
-    ("Corrupted / Noisy Square", 0, make_corrupted_square()),
-    ("Noisy & Shifted Circle", 2, generate_circle(noise_std=0.25, dropout_prob=0.05, shift=(2.0, -2.0), radius=8.5, amp=0.9)),
-    ("Corrupted / Noisy Triangle", 1, generate_triangle(noise_std=0.22, dropout_prob=0.15, shift=(-1.5, 1.0), half_h=8.5, half_w=8.5, amp=0.9)),
+    ("Clean Square", "test_1_clean_square.hex", 0, generate_square(noise_std=0.0, dropout_prob=0.0, shift=(0.0, 0.0), half_side=8.5, amp=1.0)),
+    ("Clean Triangle", "test_2_clean_triangle.hex", 1, generate_triangle(noise_std=0.0, dropout_prob=0.0, shift=(0.0, 0.0), half_h=9.0, half_w=9.0, amp=1.0)),
+    ("Clean Circle", "test_3_clean_circle.hex", 2, generate_circle(noise_std=0.0, dropout_prob=0.0, shift=(0.0, 0.0), radius=9.0, amp=1.0)),
+    ("Corrupted / Noisy Square", "test_4_noisy_square.hex", 0, make_corrupted_square()),
+    ("Noisy & Shifted Circle", "test_5_noisy_circle.hex", 2, generate_circle(noise_std=0.25, dropout_prob=0.05, shift=(2.0, -2.0), radius=8.5, amp=0.9)),
+    ("Corrupted / Noisy Triangle", "test_6_noisy_triangle.hex", 1, generate_triangle(noise_std=0.22, dropout_prob=0.15, shift=(-1.5, 1.0), half_h=8.5, half_w=8.5, amp=0.9)),
 ]
 
 all_passed = True
 test_visual_data = []
-for idx, (name, expected_cls, signal) in enumerate(test_scenarios, start=1):
+for idx, (name, hex_name, expected_cls, signal) in enumerate(test_scenarios, start=1):
     tq = quantize_input_4bit(signal)
     raw_scores, relu_scores, pred = hw_forward(tq.reshape(1, -1))
     pred_cls = int(pred[0])
@@ -322,7 +322,7 @@ for idx, (name, expected_cls, signal) in enumerate(test_scenarios, start=1):
 
     test_visual_data.append((idx, name, tq, pred_cls, relu_scores[0].tolist()))
 
-    with open(sim_dir / f"test_{idx}.hex", "w", encoding="ascii") as f:
+    with open(sim_dir / hex_name, "w", encoding="ascii") as f:
         for val in tq:
             f.write(f"{val & 0xF:X}\n")
 

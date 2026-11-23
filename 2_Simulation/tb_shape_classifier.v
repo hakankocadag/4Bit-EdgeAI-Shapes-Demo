@@ -1,5 +1,5 @@
 `timescale 1ns / 1ps
-module tb_brute_force;
+module tb_shape_classifier;
 
     parameter DATA_WIDTH = 4;
     parameter ACC_WIDTH = 24;
@@ -31,7 +31,6 @@ module tb_brute_force;
         forever #10 clk = ~clk;
     end
 
-    reg [8*64:1] filename;
     reg [1:0] expected_class;
     integer i;
     integer pass_count = 0;
@@ -52,34 +51,44 @@ module tb_brute_force;
         $display("==================================================\n");
 
         for (i = 1; i <= 6; i = i + 1) begin
-            $sformat(filename, "test_%0d.hex", i);
-            $readmemh(filename, uut.act_mem.mem_array);
-
-            if (i == 1) begin
-                expected_class = 2'b00;
-                $display("TEST 1: CLEAN SQUARE (Expected: 00)");
-            end else if (i == 2) begin
-                expected_class = 2'b01;
-                $display("TEST 2: CLEAN TRIANGLE (Expected: 01)");
-            end else if (i == 3) begin
-                expected_class = 2'b10;
-                $display("TEST 3: CLEAN CIRCLE (Expected: 10)");
-            end else if (i == 4) begin
-                expected_class = 2'b00;
-                $display("TEST 4: CORRUPTED / NOISY SQUARE (Expected: 00)");
-            end else if (i == 5) begin
-                expected_class = 2'b10;
-                $display("TEST 5: NOISY & SHIFTED CIRCLE (Expected: 10)");
-            end else if (i == 6) begin
-                expected_class = 2'b01;
-                $display("TEST 6: CORRUPTED / NOISY TRIANGLE (Expected: 01)");
-            end
+            case (i)
+                1: begin
+                    $readmemh("test_1_clean_square.hex", uut.act_mem.mem_array);
+                    expected_class = 2'b00;
+                    $display("TEST 1: CLEAN SQUARE (Expected: 00)");
+                end
+                2: begin
+                    $readmemh("test_2_clean_triangle.hex", uut.act_mem.mem_array);
+                    expected_class = 2'b01;
+                    $display("TEST 2: CLEAN TRIANGLE (Expected: 01)");
+                end
+                3: begin
+                    $readmemh("test_3_clean_circle.hex", uut.act_mem.mem_array);
+                    expected_class = 2'b10;
+                    $display("TEST 3: CLEAN CIRCLE (Expected: 10)");
+                end
+                4: begin
+                    $readmemh("test_4_noisy_square.hex", uut.act_mem.mem_array);
+                    expected_class = 2'b00;
+                    $display("TEST 4: CORRUPTED / NOISY SQUARE (Expected: 00)");
+                end
+                5: begin
+                    $readmemh("test_5_noisy_circle.hex", uut.act_mem.mem_array);
+                    expected_class = 2'b10;
+                    $display("TEST 5: NOISY & SHIFTED CIRCLE (Expected: 10)");
+                end
+                6: begin
+                    $readmemh("test_6_noisy_triangle.hex", uut.act_mem.mem_array);
+                    expected_class = 2'b01;
+                    $display("TEST 6: CORRUPTED / NOISY TRIANGLE (Expected: 01)");
+                end
+            endcase
 
             @(posedge clk);
             start_time = $time;
-            start = 1;
-            #40;
-            start = 0;
+            start <= 1'b1;
+            repeat (2) @(posedge clk);
+            start <= 1'b0;
 
             @(posedge done);
             elapsed_ns = $time - start_time;

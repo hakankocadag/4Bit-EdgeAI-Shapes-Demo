@@ -1,4 +1,7 @@
 `timescale 1ns / 1ps
+// =============================================================================
+//  Argmax Unit -- Sequential Score Comparator (Zero-Cycle Lag on Done)
+// =============================================================================
 module argmax_unit #(
     parameter SCORE_WIDTH = 24,
     parameter NEURON_BITS = 2

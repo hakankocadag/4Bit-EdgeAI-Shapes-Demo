@@ -1,7 +1,10 @@
 `timescale 1ns / 1ps
+// =============================================================================
+//  Control FSM -- 6-State One-Hot Moore Inference Controller
+// =============================================================================
 module control_fsm #(
-    parameter VECTOR_LENGTH = 16,
-    parameter NUM_NEURONS = 16,
+    parameter VECTOR_LENGTH = 784,
+    parameter NUM_NEURONS = 3,
     parameter ACT_ADDR_WIDTH = 10,
     parameter NEURON_ADDR_WIDTH = 2
 )(

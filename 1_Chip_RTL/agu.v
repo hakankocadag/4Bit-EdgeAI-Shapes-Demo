@@ -1,4 +1,7 @@
 `timescale 1ns / 1ps
+// =============================================================================
+//  Address Generation Unit (AGU) -- Activation & Weight Memory Addressing
+// =============================================================================
 module agu #(
     parameter ACT_ADDR_WIDTH = 4,
     parameter WEIGHT_ADDR_WIDTH = 8,

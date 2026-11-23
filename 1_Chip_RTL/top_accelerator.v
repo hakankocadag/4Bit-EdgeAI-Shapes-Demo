@@ -1,4 +1,7 @@
 `timescale 1ns / 1ps
+// =============================================================================
+//  Top-Level 4-Bit Quantized Shape Classification Hardware Accelerator
+// =============================================================================
 module top_accelerator #(
     parameter DATA_WIDTH = 4,
     parameter ACC_WIDTH = 24,
@@ -14,11 +17,11 @@ module top_accelerator #(
     output wire done,
     output wire output_valid,
     output wire signed [ACC_WIDTH-1:0] final_result,
-    output wire [$clog2(NUM_NEURONS)-1:0] predicted_class
+    output wire [((NUM_NEURONS <= 1) ? 1 : $clog2(NUM_NEURONS))-1:0] predicted_class
 );
-    localparam ACT_ADDR_WIDTH = $clog2(VECTOR_LENGTH) == 0 ? 1 : $clog2(VECTOR_LENGTH);
-    localparam WEIGHT_ADDR_WIDTH = $clog2(VECTOR_LENGTH * NUM_NEURONS) == 0 ? 1 : $clog2(VECTOR_LENGTH * NUM_NEURONS);
-    localparam NEURON_ADDR_WIDTH = $clog2(NUM_NEURONS) == 0 ? 1 : $clog2(NUM_NEURONS);
+    localparam ACT_ADDR_WIDTH = (VECTOR_LENGTH <= 1) ? 1 : $clog2(VECTOR_LENGTH);
+    localparam WEIGHT_ADDR_WIDTH = ((VECTOR_LENGTH * NUM_NEURONS) <= 1) ? 1 : $clog2(VECTOR_LENGTH * NUM_NEURONS);
+    localparam NEURON_ADDR_WIDTH = (NUM_NEURONS <= 1) ? 1 : $clog2(NUM_NEURONS);
 
     wire mem_en, mac_en, acc_clr, agu_inc, agu_clr, relu_en;
     wire [ACT_ADDR_WIDTH-1:0] act_addr;
@@ -84,8 +87,15 @@ module top_accelerator #(
     // Read bias for the active neuron counter (combinational)
     wire signed [ACC_WIDTH-1:0] current_bias = bias_mem[neuron_count];
 
-    // Add bias to MAC output: z = (W * x) + b
-    wire signed [ACC_WIDTH-1:0] mac_plus_bias = $signed(mac_out) + current_bias;
+    // Saturating signed bias addition: z = sat((W * x) + b)
+    localparam signed [ACC_WIDTH-1:0] BIAS_MAX_POS = {1'b0, {(ACC_WIDTH-1){1'b1}}};
+    localparam signed [ACC_WIDTH-1:0] BIAS_MAX_NEG = {1'b1, {(ACC_WIDTH-1){1'b0}}};
+
+    wire signed [ACC_WIDTH-1:0] bias_sum_raw = $signed(mac_out) + current_bias;
+    wire bias_pos_ovf = (~mac_out[ACC_WIDTH-1]) & (~current_bias[ACC_WIDTH-1]) & bias_sum_raw[ACC_WIDTH-1];
+    wire bias_neg_ovf = mac_out[ACC_WIDTH-1] & current_bias[ACC_WIDTH-1] & (~bias_sum_raw[ACC_WIDTH-1]);
+    wire signed [ACC_WIDTH-1:0] mac_plus_bias = bias_pos_ovf ? BIAS_MAX_POS :
+                                                (bias_neg_ovf ? BIAS_MAX_NEG : bias_sum_raw);
 
     // ReLU operates on the biased pre-activation sum
     relu_unit #(.WIDTH(ACC_WIDTH)) relu_inst (

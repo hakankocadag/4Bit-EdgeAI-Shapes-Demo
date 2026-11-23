@@ -1,6 +1,6 @@
 # 4-Bit Quantized Shape Classification Hardware Accelerator
 
-A synthesizable **Verilog-2001 Hardware Neural Network Accelerator** for edge classification of **28×28 grayscale images (784 pixels, 4-bit signed per pixel)** into three geometric shape classes without requiring an external CPU or operating system:
+A synthesizable **Verilog-2005 Hardware Neural Network Accelerator** for edge classification of **28×28 grayscale images (784 pixels, 4-bit signed per pixel)** into three geometric shape classes without requiring an external CPU or operating system:
 
 | `predicted_class [1:0]` | Shape Class | Description |
 | :---: | :--- | :--- |
@@ -34,6 +34,9 @@ At a **50 MHz** clock (`20 ns` period), a complete 3-neuron inference finishes i
 | `ACC_WIDTH` | `24` | Signed 24-bit accumulator, bias, and ReLU data width (`[-8,388,608, +8,388,607]`) |
 | `VECTOR_LENGTH` | `784` | Input feature vector size (`28 × 28` pixels) |
 | `NUM_NEURONS` | `3` | Number of output classes (`Square`, `Triangle`, `Circle`) |
+| `WEIGHT_FILE` | `"weights.hex"` | Weight ROM initialization file (`VECTOR_LENGTH × NUM_NEURONS` entries) |
+| `ACT_FILE` | `"acts.hex"` | Activation RAM initialization file (`VECTOR_LENGTH` entries) |
+| `BIAS_FILE` | `"biases.hex"` | Bias ROM initialization file (`NUM_NEURONS` entries) |
 | `ACT_ADDR_WIDTH` | `10` | $\lceil \log_2(784) \rceil$ — addresses `0..783` in `act_mem` |
 | `WEIGHT_ADDR_WIDTH` | `12` | $\lceil \log_2(784 \times 3) \rceil$ — addresses `0..2351` in `weight_mem` |
 | `NEURON_ADDR_WIDTH` | `2` | $\lceil \log_2(3) \rceil$ — addresses `0..2` in `bias_mem` and `argmax_unit` |
@@ -75,7 +78,7 @@ At a **50 MHz** clock (`20 ns` period), a complete 3-neuron inference finishes i
 | `bias_mem` (`reg` array) | `3 × 24` bits | 24-bit signed two's complement | Combinational bias ROM (`biases.hex`), indexed by `neuron_count[1:0]` |
 | `product` (inside `mac_unit`) | `8` bits (`[7:0]`) | Signed `4b × 4b` (`[-56, +64]`) | Combinational two's complement product (`signed_w * signed_a`) |
 | `mac_out` | `24` bits (`[23:0]`) | 24-bit signed saturated | Registered dot-product accumulator ($\sum w \cdot x$) |
-| `mac_plus_bias` | `24` bits (`[23:0]`) | 24-bit signed | Combinational bias sum: `$signed(mac_out) + current_bias` |
+| `mac_plus_bias` | `24` bits (`[23:0]`) | 24-bit signed saturated | Combinational saturating bias sum: `sat($signed(mac_out) + current_bias)` |
 
 ---
 
@@ -177,7 +180,7 @@ $$D_4 = Q_3$$
 
 $$D_5 = (Q_4 \cdot E_n) + (Q_5 \cdot S)$$
 
-*(With `rst_n = 0`, `DFF0` asynchronously presets `Q0 <= 1` and `DFF1..DFF5` asynchronously clear `Q1..Q5 <= 0`.)*
+*(With `rst_n = 0`, `DFF0` asynchronously presets `Q0 <= 1` and `DFF1..DFF5` asynchronously clear `Q1..Q5 <= 0`. Equations $D_0$–$D_5$ describe valid One-Hot operation; `control_fsm.v` additionally includes a `default: next_state = S_IDLE` safety fallback so any corrupted non-one-hot encoding, including `6'b000000`, automatically recovers to `S_IDLE` on the next clock edge.)*
 
 ### 5.2 FSM Moore Output Equations
 
@@ -203,7 +206,7 @@ $$\text{mac\_out}^{+} = \begin{cases} +8,388,607\ (\texttt{24'h7FFFFF}), & \text
 
 - **Bias Addition & ReLU (`top_accelerator.v`, `relu_unit.v`):**
 
-$$z_n = \text{mac\_out}_n + b_n, \qquad \text{final\_result}_n = \text{ReLU}(z_n) = \overline{z_n[23]} \cdot z_n = \max(0,\ z_n)$$
+$$z_n = \text{sat}_{24}(\text{mac\_out}_n + b_n), \qquad \text{final\_result}_n = \text{ReLU}(z_n) = \overline{z_n[23]} \cdot z_n = \max(0,\ z_n)$$
 
 - **Sequential Argmax (`argmax_unit.v`):** On each `score_valid = 1` pulse ($n \in \{0, 1, 2\}$), updates `predicted_class` immediately whenever `n == 0` or `score > max_score`, so `predicted_class` is already settled on the exact rising edge of `done`.
 
@@ -236,17 +239,21 @@ The accelerator separates the **Control Plane** (`control_fsm` + `agu`) from the
 
 ### 7.2 Bit-Exact Hardware Verification (Questa 2025.2)
 
-- **Unit Verification (`tb_full_brute_force.v`):** `270 / 270` checks passed (`0` errors, `0` warnings) — exhaustive `256/256` signed 4-bit multiplications, `4/4` positive/negative/mixed saturation scenarios, and `10/10` ReLU boundary tests.
-- **System Verification (`tb_brute_force.v`):** `6 / 6` shape classification tests passed (`0` errors, `0` warnings) at `@(posedge done)` with `94,220 ns` latency per inference and **100% bit-exact score parity** against the Python Golden Model:
+- **System Verification (`tb_shape_classifier.v`):** `6 / 6` shape classification tests passed (`0` errors, `0` warnings) at `@(posedge done)` with `94,220 ns` latency per inference and **100% bit-exact score parity** against the Python Golden Model:
 
 | Test | Scenario | Expected | Python ReLU Scores `[Sq, Tri, Cir]` | Questa RTL `ARGMAX` Scores | Hardware Result | Latency |
 | :---: | :--- | :---: | :---: | :---: | :---: | :---: |
-| 1 | Clean Square (`test_1.hex`) | `00` (Square) | `[1068, 0, 0]` | `[1068, 0, 0]` | `00 (SQUARE)` **[PASS]** | `94,220 ns` |
-| 2 | Clean Triangle (`test_2.hex`) | `01` (Triangle) | `[0, 938, 0]` | `[0, 938, 0]` | `01 (TRIANGLE)` **[PASS]** | `94,220 ns` |
-| 3 | Clean Circle (`test_3.hex`) | `10` (Circle) | `[0, 0, 899]` | `[0, 0, 899]` | `10 (CIRCLE)` **[PASS]** | `94,220 ns` |
-| 4 | Corrupted / Noisy Square (`test_4.hex`) | `00` (Square) | `[483, 0, 0]` | `[483, 0, 0]` | `00 (SQUARE)` **[PASS]** | `94,220 ns` |
-| 5 | Noisy & Shifted Circle (`test_5.hex`) | `10` (Circle) | `[47, 0, 573]` | `[47, 0, 573]` | `10 (CIRCLE)` **[PASS]** | `94,220 ns` |
-| 6 | Corrupted / Noisy Triangle (`test_6.hex`) | `01` (Triangle) | `[0, 661, 0]` | `[0, 661, 0]` | `01 (TRIANGLE)` **[PASS]** | `94,220 ns` |
+| 1 | Clean Square (`test_1_clean_square.hex`) | `00` (Square) | `[1068, 0, 0]` | `[1068, 0, 0]` | `00 (SQUARE)` **[PASS]** | `94,220 ns` |
+| 2 | Clean Triangle (`test_2_clean_triangle.hex`) | `01` (Triangle) | `[0, 938, 0]` | `[0, 938, 0]` | `01 (TRIANGLE)` **[PASS]** | `94,220 ns` |
+| 3 | Clean Circle (`test_3_clean_circle.hex`) | `10` (Circle) | `[0, 0, 899]` | `[0, 0, 899]` | `10 (CIRCLE)` **[PASS]** | `94,220 ns` |
+| 4 | Corrupted / Noisy Square (`test_4_noisy_square.hex`) | `00` (Square) | `[483, 0, 0]` | `[483, 0, 0]` | `00 (SQUARE)` **[PASS]** | `94,220 ns` |
+| 5 | Noisy & Shifted Circle (`test_5_noisy_circle.hex`) | `10` (Circle) | `[47, 0, 573]` | `[47, 0, 573]` | `10 (CIRCLE)` **[PASS]** | `94,220 ns` |
+| 6 | Corrupted / Noisy Triangle (`test_6_noisy_triangle.hex`) | `01` (Triangle) | `[0, 661, 0]` | `[0, 661, 0]` | `01 (TRIANGLE)` **[PASS]** | `94,220 ns` |
+
+**Questa 2025.2 Wave Captures** ([interactive browser waveform & MAC explorer](docs/chip_waveforms.html)):
+
+![Questa 2025.2 Full 6-Test Waveform](docs/questa_wave_full.png)
+![Questa 2025.2 Test 5 End & Done Zoom](docs/questa_wave_zoom_done.png)
 
 ---
 
@@ -254,30 +261,38 @@ The accelerator separates the **Control Plane** (`control_fsm` + `agu`) from the
 
 ```text
 4Bit-EdgeAI-Shapes-Demo/
-├── 1_Chip_RTL/                    # Synthesizable Verilog-2001 RTL
-│   ├── top_accelerator.v          # Top-level integration + 24-bit bias adder
-│   ├── control_fsm.v              # 6-state One-Hot Moore FSM
-│   ├── agu.v                      # Address Generation Unit for activation and weight memories
-│   ├── mac_unit.v                 # 4b x 4b signed multiplier + 24b saturating accumulator
-│   ├── relu_unit.v                # MUX-based 24-bit ReLU unit
-│   ├── argmax_unit.v              # Sequential comparator (zero-cycle lag on done)
-│   └── memory_block.v             # Synchronous ROM/RAM ($readmemh)
-├── 2_Simulation/                  # Simulation testbenches & quantized HEX files
-│   ├── tb_brute_force.v           # 6-shape system testbench (50 MHz)
-│   ├── tb_full_brute_force.v      # 270-test exhaustive MAC & ReLU unit suite
-│   ├── weights.hex                # 2,352 quantized 4-bit weights (3 x 784)
-│   ├── biases.hex                 # 3 quantized 24-bit biases
-│   ├── acts.hex                   # Default input image (Corrupted Square)
-│   └── test_1.hex .. test_6.hex   # 6 shape test vectors (784 x 4-bit each)
-├── 3_Model_Training_Python/       # ML training, 4-bit quantization & visualization
-│   ├── train_shape_model.py       # 8x8 anti-aliased dataset, training, hex & PNG export
-│   ├── weight_templates.png       # Learned 28x28 weight templates
-│   └── test_shapes.png            # 6 anti-aliased test shapes & hardware scores
-└── docs/                          # Hardware documentation diagrams
-    ├── generate_diagrams.py       # Reproducible script for all architecture diagrams
-    ├── fsm_state_diagram.png      # 6-state Moore FSM state diagram
-    ├── fsm_gate_schematic.png     # Gate-level FSM schematic
-    └── top_block_diagram.png      # Top-level datapath & control block diagram
+├── .gitignore                          # Ignores simulator work/, waveforms, and Python caches
+├── README.md                           # Architecture, truth tables, equations & run guide
+├── 1_Chip_RTL/                         # Synthesizable Verilog-2005 RTL
+│   ├── top_accelerator.v               # Top-level integration + 24-bit saturating bias adder
+│   ├── control_fsm.v                   # 6-state One-Hot Moore FSM
+│   ├── agu.v                           # Address Generation Unit for activation and weight memories
+│   ├── mac_unit.v                      # 4b x 4b signed multiplier + 24b saturating accumulator
+│   ├── relu_unit.v                     # MUX-based 24-bit ReLU unit
+│   ├── argmax_unit.v                   # Sequential comparator (zero-cycle lag on done)
+│   └── memory_block.v                  # Synchronous ROM/RAM ($readmemh)
+├── 2_Simulation/                       # Simulation testbench & quantized HEX files
+│   ├── tb_shape_classifier.v           # 6-shape system testbench (50 MHz)
+│   ├── weights.hex                     # 2,352 quantized 4-bit weights (3 x 784)
+│   ├── biases.hex                      # 3 quantized 24-bit biases
+│   ├── acts.hex                        # Default input image (Corrupted Square)
+│   ├── test_1_clean_square.hex         # Clean 28x28 Square test image
+│   ├── test_2_clean_triangle.hex       # Clean 28x28 Triangle test image
+│   ├── test_3_clean_circle.hex         # Clean 28x28 Circle test image
+│   ├── test_4_noisy_square.hex         # Corrupted / Noisy Square test image
+│   ├── test_5_noisy_circle.hex         # Noisy & Shifted Circle test image
+│   └── test_6_noisy_triangle.hex       # Corrupted / Noisy Triangle test image
+├── 3_Model_Training_Python/            # ML training, 4-bit quantization & visualization
+│   ├── train_shape_model.py            # 8x8 anti-aliased dataset, training, hex & PNG export
+│   ├── weight_templates.png            # Learned 28x28 weight templates
+│   └── test_shapes.png                 # 6 anti-aliased test shapes & hardware scores
+└── docs/                               # Hardware documentation diagrams & waveforms
+    ├── fsm_state_diagram.png           # 6-state Moore FSM state diagram
+    ├── fsm_gate_schematic.png          # Gate-level FSM schematic
+    ├── top_block_diagram.png           # Top-level datapath & control block diagram
+    ├── questa_wave_full.png            # Questa 2025.2 Wave capture (all 6 tests)
+    ├── questa_wave_zoom_done.png       # Questa 2025.2 Wave zoom (Test 5 zero-cycle done)
+    └── chip_waveforms.html             # Standalone interactive VCD waveform & MAC explorer
 ```
 
 ### Run Python Training & Regenerate `.hex` / PNG Files
@@ -286,20 +301,19 @@ python 3_Model_Training_Python/train_shape_model.py
 ```
 
 ### Run Hardware Simulation (from `2_Simulation/`)
-> **Note:** Run simulations inside `2_Simulation/` so `$readmemh` resolves `weights.hex`, `biases.hex`, `acts.hex`, and `test_*.hex` in the working directory.
+> **Note:** Run simulations inside `2_Simulation/` so `$readmemh` resolves `weights.hex`, `biases.hex`, `acts.hex`, and `test_*.hex` in the working directory. On Windows PowerShell, replace `../1_Chip_RTL/*.v` with `(Get-ChildItem ..\1_Chip_RTL\*.v).FullName`.
 
 **Questa / ModelSim:**
 ```bash
 cd 2_Simulation
 vlib work
-vlog -work work ../1_Chip_RTL/*.v tb_brute_force.v tb_full_brute_force.v
-vsim -c -lib work -do "run -all; quit -f" tb_full_brute_force
-vsim -c -lib work -do "run -all; quit -f" tb_brute_force
+vlog -work work ../1_Chip_RTL/*.v tb_shape_classifier.v
+vsim -c -lib work -do "run -all; quit -f" tb_shape_classifier
 ```
 
 **Icarus Verilog:**
 ```bash
 cd 2_Simulation
-iverilog -o sim.vvp ../1_Chip_RTL/*.v tb_brute_force.v
+iverilog -o sim.vvp ../1_Chip_RTL/*.v tb_shape_classifier.v
 vvp sim.vvp
 ```
