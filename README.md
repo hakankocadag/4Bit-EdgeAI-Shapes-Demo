@@ -1,35 +1,59 @@
-# 4-Bit Edge-AI ECG Classification Hardware Accelerator
+# 4-Bit Quantized Shape Classification Hardware Accelerator
 
-## Proje Hakkında (Demo ve Kanıt Sürümü)
-Bu proje, Computer Architecture dersi kapsamında sunulan **Özelleşmiş CPU (Hardware Accelerator)** ve **FSM (Durum Makinesi)** donanım mimarisi proje fikrinin **"Demo ve Çalışabilirliğinin Kanıtı (Proof of Concept)"** sürümüdür. Projenin amacı, yapay zeka (Makine Öğrenmesi) algoritmalarını harici bir işlemciye (CPU) veya işletim sistemine ihtiyaç duymadan doğrudan donanım seviyesinde koşturmanın mümkün olduğunu göstermektir. 
+## Proje Hakkında
+Bu proje, harici bir işlemciye (CPU) veya işletim sistemine ihtiyaç duymadan doğrudan donanım seviyesinde çalışan **4-bit Kuantize Yapay Zeka Hızlandırıcısı** tasarımını içerir. Tasarım, **28×28 piksel (784 elemanlı, piksel başına 4-bit işaretli)** giriş görüntülerini analiz ederek üç geometrik şekilden hangisine ait olduğunu sınıflandırır:
 
-Sistem, bir hastadan alınan 784 örnekli EKG sinyalini donanımsal olarak analiz edip hastanın durumunu 3 sınıfa (Normal, Aritmi, Gürültü) ayırmaktadır. Tasarım, tamamen 4-bit veri yolları, Saturation (Taşma Koruması) mantığı ve donanımsal ReLU / Argmax mimarileri kullanılarak Verilog-2001 ile yazılmıştır. Bu demo, önerilen donanım mimarisinin Icarus Verilog ortamında mikrosaniyeler içinde kusursuzca çalıştığını ve hedeflenen donanımsal yapay zeka vizyonunun gerçekçi ve uygulanabilir olduğunu kanıtlamaktadır.
+- `00` — **Kare**
+- `01` — **Üçgen**
+- `10` — **Daire**
+
+Mimari; tamamen 4-bit veri yolları, taşma korumalı (Saturation) 24-bit akümülatör, kombinasyonel bias toplama, donanımsal ReLU ve sıralı Argmax karşılaştırıcı birimleri kullanılarak sentezlenebilir Verilog-2001 ile yazılmıştır. 50 MHz saat frekansında (20 ns periyot) tek bir çıkarım (inference) yaklaşık **94.2 µs** içinde tamamlanır.
 
 ## Klasör Yapısı
-Bu proje paketi 3 ana klasörden oluşmaktadır:
 
 ### 1. `1_Chip_RTL`
-Sadece çipe (ASIC / FPGA) basılacak olan saf donanım kodlarını (Sentezlenebilir Verilog) içerir.
-- `top_accelerator.v`: Ana entegrasyon ve kombinasyonel Bias birimi.
-- `control_fsm.v`: Sistemin Moore/Mealy Durum Makinesi (Control Unit).
-- `mac_unit.v`: 4-bit işaretli Çarpma-Toplama ve Saturation birimi (Datapath).
-- `relu_unit.v`: MUX tabanlı donanımsal aktivasyon birimi.
-- `argmax_unit.v`: Sıralı (Sequential) donanımsal karşılaştırıcı (Karar Mekanizması).
-- `memory_block.v`: Ağırlık ve sensör verilerini tutan ROM/RAM bellek birimi.
+Çip (ASIC / FPGA) için sentezlenebilir saf Verilog donanım modüllerini içerir:
+- `top_accelerator.v`: Ana entegrasyon ve kombinasyonel bias toplama birimi (`z = W·x + b`).
+- `control_fsm.v`: Moore tipi durum makinesi (`S_IDLE -> S_FETCH -> S_MAC -> S_RELU -> S_OUTPUT -> S_DONE`).
+- `mac_unit.v`: 4-bit işaretli Çarpma-Toplama ve 24-bit Saturation birimi.
+- `relu_unit.v`: MUX tabanlı donanımsal ReLU aktivasyon birimi.
+- `argmax_unit.v`: Sıralı (Sequential) donanımsal maksimum skor karşılaştırıcısı (`predicted_class`).
+- `memory_block.v`: Ağırlık (`weights.hex`) ve 28×28 piksel giriş verisini (`acts.hex`) tutan bellek birimi.
 - `agu.v`: Adres Üretici (Address Generation Unit).
 
 ### 2. `2_Simulasyon`
-Çipi ModelSim veya Icarus Verilog gibi ortamlarda test etmek ve dalga formlarını (Waveforms) görmek için gereken her şeyi içerir. 
-- Çip kodlarına ek olarak `tb_full_brute_force.v` (Testbench) dosyası bulunur.
-- Sistemin hafızasına yüklenecek olan eğitilmiş katsayılar (`weights.hex`, `biases.hex`) ve test hastalarına ait veriler (`test_*.hex`) buradadır. *Not: Simülasyon yaparken bu hex dosyalarının RTL kodlarıyla aynı dizinde olması zorunludur.*
+Simülasyon testbench'lerini ve kuantize `.hex` bellek dosyalarını içerir:
+- `tb_brute_force.v`: 5 farklı 28×28 şekil test senaryosunu (`test_1.hex`–`test_5.hex`) donanımda çalıştıran ve `predicted_class` çıkışını doğrulayan sistem testbench'i.
+- `tb_full_brute_force.v`: `mac_unit` (256 tekil çarpım + saturation) ve `relu_unit` birimlerini golden model ile doğrulayan birim testbench'i.
+- `weights.hex`: 3 nöron × 784 piksel = 2352 adet 4-bit ağırlık.
+- `biases.hex`: 3 adet 24-bit işaretli bias (two's complement hex).
+- `acts.hex` ve `test_1.hex`–`test_5.hex`: 784 piksellik 4-bit şekil test vektörleri (Kusursuz Kare, Kusursuz Üçgen, Kusursuz Daire, Bozuk/Gürültülü Kare, Gürültülü ve Kaymış Daire).
 
 ### 3. `3_Model_Egitimi_Python`
-Yapay zeka ağırlıklarının (Hex dosyaları) nasıl elde edildiğini kanıtlayan Python eğitim kodunu barındırır.
-- `train_ecg_model.py`: Sentetik EKG verisi üretir, modeli eğitir (Gradient Descent) ve Edge-AI donanımına uyumlu olması için tüm sayıları 4-bit'e sıkıştırıp (Quantization) `.hex` çıktıları verir.
+- `train_shape_model.py`: Sentetik 28×28 Kare, Üçgen ve Daire veri seti üretir, Softmax + Cross-Entropy ile doğrusal sınıflandırıcı eğitir, ağırlıkları 4-bit'e (`[-8, +7]`) ve bias'ları 24-bit'e kuantize eder, donanım golden modeliyle doğrulayıp tüm `.hex` dosyalarını `2_Simulasyon/` klasörüne yazar.
 
-## Simülasyon Nasıl Çalıştırılır?
-1. Icarus Verilog'da yeni bir proje açın.
-2. `2_Simulasyon` klasöründeki tüm `.v` dosyalarını projeye dahil edin (Testbench ve RTL dosyaları).
-3. Klasörde yer alan `.hex` dosyalarının derleme dizininde bulunduğundan emin olun.
-4. `tb_full_brute_force.v` dosyasını `Top Level Entity` (UUT) olarak seçip simülasyonu başlatın.
-5. Dalga formlarında 47. mikrosaniyede `done` sinyalinin 1 olduğunu ve `predicted_class` pininden sonucun (00, 01 veya 10) çıktığını gözlemleyin.
+## Nasıl Çalıştırılır?
+
+### 1. Python ile Model Eğitimi ve `.hex` Üretimi
+```bash
+python 3_Model_Egitimi_Python/train_shape_model.py
+```
+
+### 2. Verilog Simülasyonu (Questa / ModelSim veya Icarus Verilog)
+`2_Simulasyon` dizini içinde çalıştırın (`.hex` dosyalarının çalışma dizininde bulunması gerekir):
+
+**Questa / ModelSim:**
+```bash
+cd 2_Simulasyon
+vlib work
+vlog -work work ../1_Chip_RTL/*.v tb_brute_force.v tb_full_brute_force.v
+vsim -c -lib work -do "run -all; quit -f" tb_full_brute_force
+vsim -c -lib work -do "run -all; quit -f" tb_brute_force
+```
+
+**Icarus Verilog:**
+```bash
+cd 2_Simulasyon
+iverilog -o sim.vvp ../1_Chip_RTL/*.v tb_brute_force.v
+vvp sim.vvp
+```
