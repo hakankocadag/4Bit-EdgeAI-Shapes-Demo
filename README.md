@@ -103,7 +103,9 @@ The controller (`control_fsm.v`) is designed as a **Moore Finite State Machine**
 ### Shorthand Transition Condition Variables
 To keep the truth tables and Boolean equations compact:
 
-$$S = \text{start}, \qquad E_a = (\text{current\_act\_index} == 783), \qquad E_n = (\text{internal\_neuron\_count} == 2)$$
+```math
+S = \text{start}, \qquad E_a = (\text{current\_act\_index} == 783), \qquad E_n = (\text{internal\_neuron\_count} == 2)
+```
 
 ---
 
@@ -120,9 +122,13 @@ $$S = \text{start}, \qquad E_a = (\text{current\_act\_index} == 783), \qquad E_n
    - Total per neuron = `1,568 + 2 = 1,570` cycles.
 3. **Total Inference Latency**:
 
-$$N_{\text{cycles}} = 1 + 3 \times (2 \times 784 + 2) = 1 + 3 \times 1570 = 4,711\text{ clock cycles}$$
+```math
+N_{\text{cycles}} = 1 + 3 \times (2 \times 784 + 2) = 1 + 3 \times 1570 = 4,711\text{ clock cycles}
+```
 
-$$T_{\text{inference}} = 4,711 \times 20\text{ ns} = 94,220\text{ ns} = 94.22\text{ }\mu\text{s}\quad (@\ 50\text{ MHz})$$
+```math
+T_{\text{inference}} = 4,711 \times 20\text{ ns} = 94,220\text{ ns} = 94.22\text{ }\mu\text{s}\quad (@\ 50\text{ MHz})
+```
 
 ---
 
@@ -168,17 +174,29 @@ $$T_{\text{inference}} = 4,711 \times 20\text{ ns} = 94,220\text{ ns} = 94.22\te
 
 From the One-Hot Next-State Truth Table (`rst_n = 1`):
 
-$$D_0 = (Q_0 + Q_5) \cdot \overline{S}$$
+```math
+D_0 = (Q_0 + Q_5) \cdot \overline{S}
+```
 
-$$D_1 = (Q_0 \cdot S) + (Q_2 \cdot \overline{E_a}) + (Q_4 \cdot \overline{E_n})$$
+```math
+D_1 = (Q_0 \cdot S) + (Q_2 \cdot \overline{E_a}) + (Q_4 \cdot \overline{E_n})
+```
 
-$$D_2 = Q_1$$
+```math
+D_2 = Q_1
+```
 
-$$D_3 = Q_2 \cdot E_a$$
+```math
+D_3 = Q_2 \cdot E_a
+```
 
-$$D_4 = Q_3$$
+```math
+D_4 = Q_3
+```
 
-$$D_5 = (Q_4 \cdot E_n) + (Q_5 \cdot S)$$
+```math
+D_5 = (Q_4 \cdot E_n) + (Q_5 \cdot S)
+```
 
 *(With `rst_n = 0`, `DFF0` asynchronously presets `Q0 <= 1` and `DFF1..DFF5` asynchronously clear `Q1..Q5 <= 0`. Equations $D_0$–$D_5$ describe valid One-Hot operation; `control_fsm.v` additionally includes a `default: next_state = S_IDLE` safety fallback so any corrupted non-one-hot encoding, including `6'b000000`, automatically recovers to `S_IDLE` on the next clock edge.)*
 
@@ -186,29 +204,43 @@ $$D_5 = (Q_4 \cdot E_n) + (Q_5 \cdot S)$$
 
 Because the encoding is One-Hot, almost every output is a direct wire tap from its state flip-flop—only `acc_clr` requires a single 2-input OR gate:
 
-$$\text{agu\_clr} = Q_0 \qquad \text{acc\_clr} = Q_0 + Q_4 \qquad \text{mem\_en} = Q_1$$
+```math
+\text{agu\_clr} = Q_0 \qquad \text{acc\_clr} = Q_0 + Q_4 \qquad \text{mem\_en} = Q_1
+```
 
-$$\text{mac\_en} = Q_2 \qquad \text{agu\_inc} = Q_2 \qquad \text{relu\_en} = Q_3$$
+```math
+\text{mac\_en} = Q_2 \qquad \text{agu\_inc} = Q_2 \qquad \text{relu\_en} = Q_3
+```
 
-$$\text{output\_valid} = Q_4 \qquad \text{done} = Q_5$$
+```math
+\text{output\_valid} = Q_4 \qquad \text{done} = Q_5
+```
 
 ### 5.3 Datapath Arithmetic Equations
 
 - **4-Bit Signed Multiplication & Sign-Extension (`mac_unit.v`):**
 
-$$p[7:0] = \text{signed}(w[3:0]) \times \text{signed}(a[3:0]), \qquad p_{\text{ext}}[23:0] = \{\{16\{p[7]\}\},\ p[7:0]\}$$
+```math
+p[7:0] = \text{signed}(w[3:0]) \times \text{signed}(a[3:0]), \qquad p_{\text{ext}}[23:0] = \{\{16\{p[7]\}\},\ p[7:0]\}
+```
 
 - **24-Bit Saturating Accumulation (`sum = mac_out + p_ext`):**
 
-$$\text{pos\_ovf} = \overline{\text{mac\_out}[23]} \cdot \overline{p_{\text{ext}}[23]} \cdot \text{sum}[23], \qquad \text{neg\_ovf} = \text{mac\_out}[23] \cdot p_{\text{ext}}[23] \cdot \overline{\text{sum}[23]}$$
+```math
+\text{pos\_ovf} = \overline{\text{mac\_out}[23]} \cdot \overline{p_{\text{ext}}[23]} \cdot \text{sum}[23], \qquad \text{neg\_ovf} = \text{mac\_out}[23] \cdot p_{\text{ext}}[23] \cdot \overline{\text{sum}[23]}
+```
 
-$$\text{mac\_out}^{+} = \begin{cases} +8,388,607\ (\texttt{24'h7FFFFF}), & \text{if } \text{pos\_ovf} = 1 \\ -8,388,608\ (\texttt{24'h800000}), & \text{if } \text{neg\_ovf} = 1 \\ \text{sum}[23:0], & \text{otherwise} \end{cases}$$
+```math
+\text{mac\_out}^{+} = \begin{cases} +8,388,607\ (\texttt{24'h7FFFFF}), & \text{if } \text{pos\_ovf} = 1 \\ -8,388,608\ (\texttt{24'h800000}), & \text{if } \text{neg\_ovf} = 1 \\ \text{sum}[23:0], & \text{otherwise} \end{cases}
+```
 
 - **Bias Addition & ReLU (`top_accelerator.v`, `relu_unit.v`):**
 
-$$z_n = \text{sat}_{24}(\text{mac\_out}_n + b_n), \qquad \text{final\_result}_n = \text{ReLU}(z_n) = \overline{z_n[23]} \cdot z_n = \max(0,\ z_n)$$
+```math
+z_n = \text{sat}_{24}(\text{mac\_out}_n + b_n), \qquad \text{final\_result}_n = \text{ReLU}(z_n) = \overline{z_n[23]} \cdot z_n = \max(0,\ z_n)
+```
 
-- **Sequential Argmax (`argmax_unit.v`):** On each `score_valid = 1` pulse ($n \in \{0, 1, 2\}$), updates `predicted_class` immediately whenever `n == 0` or `score > max_score`, so `predicted_class` is already settled on the exact rising edge of `done`.
+- **Sequential Argmax (`argmax_unit.v`):** On each `score_valid = 1` pulse (n ∈ {0, 1, 2}), updates `predicted_class` immediately whenever `n == 0` or `score > max_score`, so `predicted_class` is already settled on the exact rising edge of `done`.
 
 ---
 
