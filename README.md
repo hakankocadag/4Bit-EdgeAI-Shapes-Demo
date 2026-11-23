@@ -282,7 +282,7 @@ The accelerator separates the **Control Plane** (`control_fsm` + `agu`) from the
 | 5 | Noisy & Shifted Circle (`test_5_noisy_circle.hex`) | `10` (Circle) | `[47, 0, 573]` | `[47, 0, 573]` | `10 (CIRCLE)` **[PASS]** | `94,220 ns` |
 | 6 | Corrupted / Noisy Triangle (`test_6_noisy_triangle.hex`) | `01` (Triangle) | `[0, 661, 0]` | `[0, 661, 0]` | `01 (TRIANGLE)` **[PASS]** | `94,220 ns` |
 
-**Questa 2025.2 Wave Captures** ([interactive browser waveform & MAC explorer](docs/chip_waveforms.html)):
+**Questa 2025.2 Wave Captures** ([interactive browser waveform & MAC explorer](https://hakankocadag.github.io/4Bit-EdgeAI-Shapes-Demo/chip_waveforms.html)):
 
 ![Questa 2025.2 Full 6-Test Waveform](docs/questa_wave_full.png)
 ![Questa 2025.2 Test 5 End & Done Zoom](docs/questa_wave_zoom_done.png)
