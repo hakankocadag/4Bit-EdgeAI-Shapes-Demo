@@ -13,6 +13,9 @@
 =============================================================================
 """
 from pathlib import Path
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 
 # --- Sabit Parametreler (Verilog top_accelerator.v ile ayni olmali) ---
@@ -274,7 +277,7 @@ print(f"  acts.hex   : {VECTOR_LENGTH} piksel (4-bit) -- Varsayilan test: Bozuk 
 
 
 # ============================================================================
-# BOLUM 6: Golden Model Dogrulamasi ve 5 Test Senaryosu (test_1..test_5.hex)
+# BOLUM 6: Golden Model Dogrulamasi ve 6 Test Senaryosu (test_1..test_6.hex)
 # ============================================================================
 print("\n=== GOLDEN MODEL DOGRULAMA (ReLU + Argmax) ===")
 
@@ -284,9 +287,11 @@ test_scenarios = [
     ("Kusursuz Daire", 2, generate_circle(noise_std=0.0, dropout_prob=0.0, shift=(0.0, 0.0), radius=9.0, amp=1.0)),
     ("Bozuk / Gurultulu Kare", 0, make_corrupted_square()),
     ("Gurultulu ve Kaymis Daire", 2, generate_circle(noise_std=0.25, dropout_prob=0.05, shift=(2.0, -2.0), radius=8.5, amp=0.9)),
+    ("Bozuk / Gurultulu Ucgen", 1, generate_triangle(noise_std=0.22, dropout_prob=0.15, shift=(-1.5, 1.0), half_h=8.5, half_w=8.5, amp=0.9)),
 ]
 
 all_passed = True
+test_visual_data = []
 for idx, (name, expected_cls, signal) in enumerate(test_scenarios, start=1):
     tq = quantize_input_4bit(signal)
     raw_scores, relu_scores, pred = hw_forward(tq.reshape(1, -1))
@@ -304,9 +309,46 @@ for idx, (name, expected_cls, signal) in enumerate(test_scenarios, start=1):
         f"ReLU skorlar: {relu_scores[0].tolist()}"
     )
 
+    test_visual_data.append((idx, name, tq, pred_cls, relu_scores[0].tolist()))
+
     with open(sim_dir / f"test_{idx}.hex", "w", encoding="ascii") as f:
         for val in tq:
             f.write(f"{val & 0xF:X}\n")
 
 assert all_passed, "Golden model testlerinden en az biri basarisiz oldu!"
-print("\nTum 5/5 Golden Model testi basariyla gecti ve HEX dosyalari yazildi.")
+print("\nTum 6/6 Golden Model testi basariyla gecti ve HEX dosyalari yazildi.")
+
+
+# ============================================================================
+# BOLUM 7: Sunum ve Rapor Icin 28x28 Gorsellestirmeler (PNG)
+# ============================================================================
+script_dir = Path(__file__).resolve().parent
+
+fig_w, axes_w = plt.subplots(1, 3, figsize=(11, 3.6), constrained_layout=True)
+for n, ax in enumerate(axes_w):
+    im_w = ax.imshow(W_q[n].reshape(IMG_SIZE, IMG_SIZE), cmap="RdBu_r", vmin=-8, vmax=7)
+    ax.set_title(f"Neuron {n}: {CLASS_NAMES[n]}\n(4-bit Agirlik Sablonu)", fontsize=10)
+    ax.set_xticks([])
+    ax.set_yticks([])
+fig_w.colorbar(im_w, ax=axes_w, shrink=0.85, label="4-bit Agirlik [-8, +7]")
+fig_w.suptitle("Ogrenilmis 28x28 4-Bit Agirlik Sablonlari", fontsize=12, fontweight="bold")
+weights_png = script_dir / "weight_templates.png"
+fig_w.savefig(weights_png, dpi=150)
+plt.close(fig_w)
+
+fig_t, axes_t = plt.subplots(2, 3, figsize=(11.5, 7.2), constrained_layout=True)
+for ax, (idx, name, tq, pred_cls, relu_sc) in zip(axes_t.flat, test_visual_data):
+    im_t = ax.imshow(tq.reshape(IMG_SIZE, IMG_SIZE), cmap="viridis", vmin=-8, vmax=7)
+    ax.set_title(
+        f"Test {idx}: {name}\nTahmin: {CLASS_NAMES[pred_cls]} | ReLU: {relu_sc}",
+        fontsize=9,
+    )
+    ax.set_xticks([])
+    ax.set_yticks([])
+fig_t.colorbar(im_t, ax=axes_t, shrink=0.75, label="4-bit Piksel Degeri [-8, +7]")
+fig_t.suptitle("28x28 4-Bit Test Sekilleri ve Donanim ReLU Skorlari", fontsize=12, fontweight="bold")
+tests_png = script_dir / "test_shapes.png"
+fig_t.savefig(tests_png, dpi=150)
+plt.close(fig_t)
+
+print(f"Gorseller olusturuldu:\n  - {weights_png}\n  - {tests_png}")

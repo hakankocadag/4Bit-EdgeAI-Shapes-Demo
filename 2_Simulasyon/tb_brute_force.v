@@ -58,7 +58,7 @@ module tb_brute_force;
         $display("   (28x28 = 784 piksel | 00:Kare, 01:Ucgen, 10:Daire)");
         $display("==================================================\n");
 
-        for (i = 1; i <= 5; i = i + 1) begin
+        for (i = 1; i <= 6; i = i + 1) begin
             neuron_count = 0;
             $sformat(filename, "test_%0d.hex", i);
             $readmemh(filename, uut.act_mem.mem_array);
@@ -78,6 +78,9 @@ module tb_brute_force;
             end else if (i == 5) begin
                 expected_class = 2'b10;
                 $display("TEST 5: GURULTULU VE KAYMIS DAIRE (Beklenen: 10)");
+            end else if (i == 6) begin
+                expected_class = 2'b01;
+                $display("TEST 6: BOZUK / GURULTULU UCGEN (Beklenen: 01)");
             end
 
             @(posedge clk);
@@ -88,7 +91,7 @@ module tb_brute_force;
 
             @(posedge done);
             elapsed_ns = $time - start_time;
-            #100; // Argmax kayit guncellemesi ve race condition onlemi
+            #1; // NBA guncellemesi sonrasi done ile ayni anda aninda okuma
 
             if (predicted_class == 2'b00)
                 $display("--> SONUC: SINIF 00 (KARE) DETECTED! | Sure: %0d ns", elapsed_ns);
@@ -108,11 +111,12 @@ module tb_brute_force;
             end
             $display("--------------------------------------------------\n");
 
+            // FSM'in S_DONE -> S_IDLE gecisi ve argmax sifirlamasi icin bekle
             #100;
         end
 
         $display("==================================================");
-        $display("  OZET: %0d / 5 TEST BASARILI, %0d HATA", pass_count, fail_count);
+        $display("  OZET: %0d / 6 TEST BASARILI, %0d HATA", pass_count, fail_count);
         $display("==================================================\n");
         $finish;
     end

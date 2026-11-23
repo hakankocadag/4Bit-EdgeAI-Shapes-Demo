@@ -16,27 +16,31 @@ module argmax_unit #(
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            // En küçük negatif sayı ile başlat (Minimum possible signed value)
-            max_score <= {1'b1, {(SCORE_WIDTH-1){1'b0}}}; 
+            // En kucuk negatif sayi ile baslat (Minimum possible signed value)
+            max_score <= {1'b1, {(SCORE_WIDTH-1){1'b0}}};
             current_index <= 0;
             max_index <= 0;
             predicted_class <= 0;
         end else begin
             if (done_in) begin
-                // Bütün nöronlar bittiğinde kazananı dışarı aktar
-                predicted_class <= max_index;
-                
-                // Bir sonraki çıkarım (inference) işlemi için sıfırla
+                // Bir sonraki cikarim icin ic durumlari sifirla; predicted_class korunur
                 max_score <= {1'b1, {(SCORE_WIDTH-1){1'b0}}};
                 current_index <= 0;
+                max_index <= 0;
             end else if (score_valid) begin
-                $display("ARGMAX DEBUG: Neuron %0d | score = %d, max_score = %d | score > max_score = %b", current_index, score, max_score, score > max_score);
-                // Yeni gelen skor şu anki maksimumdan büyükse, onu maksimum yap
-                if (score > max_score) begin
+                `ifndef SYNTHESIS
+                $display("ARGMAX DEBUG: Neuron %0d | score = %d, max_score = %d | score > max_score = %b",
+                         current_index, score, max_score, score > max_score);
+                `endif
+                // Ilk noron veya daha yuksek skor geldiginde kazanan sinifi aninda guncelle
+                if ((current_index == 0) || (score > max_score)) begin
                     max_score <= score;
                     max_index <= current_index;
+                    predicted_class <= current_index;
+                end else begin
+                    predicted_class <= max_index;
                 end
-                current_index <= current_index + 1;
+                current_index <= current_index + 1'b1;
             end
         end
     end

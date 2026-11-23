@@ -1,0 +1,21 @@
+# Questa / ModelSim
+work/
+_sim_work/
+*.wlf
+transcript
+*.cr.mti
+*.mpf
+modelsim.ini
+vsim_stacktrace.vstf
+
+# Icarus Verilog / Waveforms
+*.vvp
+*.vcd
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db

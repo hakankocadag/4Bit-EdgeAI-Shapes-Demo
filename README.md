@@ -23,14 +23,14 @@ Mimari; tamamen 4-bit veri yolları, taşma korumalı (Saturation) 24-bit aküm�
 
 ### 2. `2_Simulasyon`
 Simülasyon testbench'lerini ve kuantize `.hex` bellek dosyalarını içerir:
-- `tb_brute_force.v`: 5 farklı 28×28 şekil test senaryosunu (`test_1.hex`–`test_5.hex`) donanımda çalıştıran ve `predicted_class` çıkışını doğrulayan sistem testbench'i.
+- `tb_brute_force.v`: 6 farklı 28×28 şekil test senaryosunu (`test_1.hex`–`test_6.hex`) donanımda çalıştıran ve `predicted_class` çıkışını `done` sinyali yükseldiği anda doğrulayan sistem testbench'i.
 - `tb_full_brute_force.v`: `mac_unit` (256 tekil çarpım + saturation) ve `relu_unit` birimlerini golden model ile doğrulayan birim testbench'i.
 - `weights.hex`: 3 nöron × 784 piksel = 2352 adet 4-bit ağırlık.
 - `biases.hex`: 3 adet 24-bit işaretli bias (two's complement hex).
-- `acts.hex` ve `test_1.hex`–`test_5.hex`: 784 piksellik 4-bit şekil test vektörleri (Kusursuz Kare, Kusursuz Üçgen, Kusursuz Daire, Bozuk/Gürültülü Kare, Gürültülü ve Kaymış Daire).
+- `acts.hex` ve `test_1.hex`–`test_6.hex`: 784 piksellik 4-bit şekil test vektörleri (Kusursuz Kare, Kusursuz Üçgen, Kusursuz Daire, Bozuk/Gürültülü Kare, Gürültülü ve Kaymış Daire, Bozuk/Gürültülü Üçgen).
 
 ### 3. `3_Model_Egitimi_Python`
-- `train_shape_model.py`: Sentetik 28×28 Kare, Üçgen ve Daire veri seti üretir, Softmax + Cross-Entropy ile doğrusal sınıflandırıcı eğitir, ağırlıkları 4-bit'e (`[-8, +7]`) ve bias'ları 24-bit'e kuantize eder, donanım golden modeliyle doğrulayıp tüm `.hex` dosyalarını `2_Simulasyon/` klasörüne yazar.
+- `train_shape_model.py`: Sentetik 28×28 Kare, Üçgen ve Daire veri seti üretir, Softmax + Cross-Entropy ile doğrusal sınıflandırıcı eğitir, ağırlıkları 4-bit'e (`[-8, +7]`) ve bias'ları 24-bit'e kuantize eder, donanım golden modeliyle doğrulayıp tüm `.hex` dosyalarını `2_Simulasyon/` klasörüne yazar; ayrıca sunum/rapor için `weight_templates.png` ve `test_shapes.png` görsellerini üretir.
 
 ## Nasıl Çalıştırılır?
 
