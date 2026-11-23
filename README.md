@@ -170,7 +170,7 @@ T_{\text{inference}} = 4,711 \times 20\text{ ns} = 94,220\text{ ns} = 94.22\text
 
 ## 5. Boolean Equations
 
-### 5.1 FSM Next-State Equations ($D_0$–$D_5$)
+### 5.1 FSM Next-State Equations ($D_0$ – $D_5$)
 
 From the One-Hot Next-State Truth Table (`rst_n = 1`):
 
@@ -198,7 +198,7 @@ D_4 = Q_3
 D_5 = (Q_4 \cdot E_n) + (Q_5 \cdot S)
 ```
 
-*(With `rst_n = 0`, `DFF0` asynchronously presets `Q0 <= 1` and `DFF1..DFF5` asynchronously clear `Q1..Q5 <= 0`. Equations $D_0$–$D_5$ describe valid One-Hot operation; `control_fsm.v` additionally includes a `default: next_state = S_IDLE` safety fallback so any corrupted non-one-hot encoding, including `6'b000000`, automatically recovers to `S_IDLE` on the next clock edge.)*
+*(With `rst_n = 0`, `DFF0` asynchronously presets `Q0 <= 1` and `DFF1..DFF5` asynchronously clear `Q1..Q5 <= 0`. Equations $D_0$ – $D_5$ describe valid One-Hot operation; `control_fsm.v` additionally includes a `default: next_state = S_IDLE` safety fallback so any corrupted non-one-hot encoding, including `6'b000000`, automatically recovers to `S_IDLE` on the next clock edge.)*
 
 ### 5.2 FSM Moore Output Equations
 
@@ -247,7 +247,7 @@ z_n = \text{sat}_{24}(\text{mac\_out}_n + b_n), \qquad \text{final\_result}_n = 
 ## 6. Gate-Level Schematic & Top-Level Block Diagram
 
 ### 6.1 FSM Gate-Level Logic Circuit (`control_fsm`)
-The gate-level implementation below maps the Boolean equations ($D_0$–$D_5$ and Moore outputs) directly onto standard NOT, 2-input/3-input AND/OR gates, and 6 edge-triggered D flip-flops:
+The gate-level implementation below maps the Boolean equations ($D_0$ – $D_5$ and Moore outputs) directly onto standard NOT, 2-input/3-input AND/OR gates, and 6 edge-triggered D flip-flops:
 
 ![FSM Gate-Level Schematic](docs/fsm_gate_schematic.png)
 
