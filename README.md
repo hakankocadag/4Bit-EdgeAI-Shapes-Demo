@@ -1,50 +1,55 @@
 # 4-Bit Quantized Shape Classification Hardware Accelerator
 
-## Proje Hakkında
-Bu proje, harici bir işlemciye (CPU) veya işletim sistemine ihtiyaç duymadan doğrudan donanım seviyesinde çalışan **4-bit Kuantize Yapay Zeka Hızlandırıcısı** tasarımını içerir. Tasarım, **28×28 piksel (784 elemanlı, piksel başına 4-bit işaretli)** giriş görüntülerini analiz ederek üç geometrik şekilden hangisine ait olduğunu sınıflandırır:
+## Overview
+This project implements a **4-bit Quantized Neural Network Hardware Accelerator** in synthesizable Verilog-2001, capable of classifying **28×28 grayscale images (784 pixels, 4-bit signed per pixel)** into three geometric shapes without requiring an external CPU or operating system:
 
-- `00` — **Kare**
-- `01` — **Üçgen**
-- `10` — **Daire**
+- `00` — **Square**
+- `01` — **Triangle**
+- `10` — **Circle**
 
-Mimari; tamamen 4-bit veri yolları, taşma korumalı (Saturation) 24-bit akümülatör, kombinasyonel bias toplama, donanımsal ReLU ve sıralı Argmax karşılaştırıcı birimleri kullanılarak sentezlenebilir Verilog-2001 ile yazılmıştır. 50 MHz saat frekansında (20 ns periyot) tek bir çıkarım (inference) yaklaşık **94.2 µs** içinde tamamlanır.
+The datapath uses 4-bit signed weights and activations (`[-8, +7]`), a saturation-protected 24-bit MAC accumulator, combinational bias addition, hardware ReLU activation, and a sequential Argmax comparator controlled by a Moore FSM. At a 50 MHz clock (20 ns period), a full 3-neuron inference completes in **94.22 µs** (`94220 ns`), with `predicted_class` valid immediately when `done` asserts.
 
-## Klasör Yapısı
+## Repository Structure
 
 ### 1. `1_Chip_RTL`
-Çip (ASIC / FPGA) için sentezlenebilir saf Verilog donanım modüllerini içerir:
-- `top_accelerator.v`: Ana entegrasyon ve kombinasyonel bias toplama birimi (`z = W·x + b`).
-- `control_fsm.v`: Moore tipi durum makinesi (`S_IDLE -> S_FETCH -> S_MAC -> S_RELU -> S_OUTPUT -> S_DONE`).
-- `mac_unit.v`: 4-bit işaretli Çarpma-Toplama ve 24-bit Saturation birimi.
-- `relu_unit.v`: MUX tabanlı donanımsal ReLU aktivasyon birimi.
-- `argmax_unit.v`: Sıralı (Sequential) donanımsal maksimum skor karşılaştırıcısı (`predicted_class`).
-- `memory_block.v`: Ağırlık (`weights.hex`) ve 28×28 piksel giriş verisini (`acts.hex`) tutan bellek birimi.
-- `agu.v`: Adres Üretici (Address Generation Unit).
+Synthesizable Verilog-2001 hardware modules:
+- `top_accelerator.v`: Top-level integration and combinational bias adder (`z = W·x + b`).
+- `control_fsm.v`: Moore FSM controller (`S_IDLE -> S_FETCH -> S_MAC -> S_RELU -> S_OUTPUT -> S_DONE`).
+- `mac_unit.v`: 4-bit signed Multiply-Accumulate unit with 24-bit saturation logic.
+- `relu_unit.v`: MUX-based hardware ReLU unit.
+- `argmax_unit.v`: Sequential hardware comparator driving `predicted_class` with zero-cycle lag on `done`.
+- `memory_block.v`: Synchronous ROM/RAM block initialized via `$readmemh`.
+- `agu.v`: Address Generation Unit for activations, weights, and neuron indices.
 
-### 2. `2_Simulasyon`
-Simülasyon testbench'lerini ve kuantize `.hex` bellek dosyalarını içerir:
-- `tb_brute_force.v`: 6 farklı 28×28 şekil test senaryosunu (`test_1.hex`–`test_6.hex`) donanımda çalıştıran ve `predicted_class` çıkışını `done` sinyali yükseldiği anda doğrulayan sistem testbench'i.
-- `tb_full_brute_force.v`: `mac_unit` (256 tekil çarpım + saturation) ve `relu_unit` birimlerini golden model ile doğrulayan birim testbench'i.
-- `weights.hex`: 3 nöron × 784 piksel = 2352 adet 4-bit ağırlık.
-- `biases.hex`: 3 adet 24-bit işaretli bias (two's complement hex).
-- `acts.hex` ve `test_1.hex`–`test_6.hex`: 784 piksellik 4-bit şekil test vektörleri (Kusursuz Kare, Kusursuz Üçgen, Kusursuz Daire, Bozuk/Gürültülü Kare, Gürültülü ve Kaymış Daire, Bozuk/Gürültülü Üçgen).
+### 2. `2_Simulation`
+Testbenches and quantized `.hex` memory files:
+- `tb_brute_force.v`: System-level testbench running 6 shape scenarios (`test_1.hex`–`test_6.hex`) at 50 MHz and checking `predicted_class` against expected labels immediately on `@(posedge done)`.
+- `tb_full_brute_force.v`: Exhaustive unit verification suite for `mac_unit` (all 256 signed 4-bit pairs + saturation) and `relu_unit` (270 total checks).
+- `weights.hex`: `3 × 784 = 2352` quantized 4-bit weights.
+- `biases.hex`: 3 quantized 24-bit two's complement biases.
+- `acts.hex` and `test_1.hex`–`test_6.hex`: 784-pixel 4-bit test vectors (`Clean Square`, `Clean Triangle`, `Clean Circle`, `Corrupted / Noisy Square`, `Noisy & Shifted Circle`, `Corrupted / Noisy Triangle`).
 
-### 3. `3_Model_Egitimi_Python`
-- `train_shape_model.py`: Sentetik 28×28 Kare, Üçgen ve Daire veri seti üretir, Softmax + Cross-Entropy ile doğrusal sınıflandırıcı eğitir, ağırlıkları 4-bit'e (`[-8, +7]`) ve bias'ları 24-bit'e kuantize eder, donanım golden modeliyle doğrulayıp tüm `.hex` dosyalarını `2_Simulasyon/` klasörüne yazar; ayrıca sunum/rapor için `weight_templates.png` ve `test_shapes.png` görsellerini üretir.
+### 3. `3_Model_Training_Python`
+- `train_shape_model.py`: Generates 28×28 synthetic shape datasets using **8×8 supersampled anti-aliasing** (utilizing intermediate 4-bit grayscale edge levels `0..7`), trains a Softmax + Cross-Entropy linear classifier, quantizes weights/biases, verifies 6/6 scenarios against a bit-exact hardware Golden Model, writes all `.hex` files to `2_Simulation/`, and exports visualizations:
+  - `weight_templates.png`: Learned 28×28 4-bit weight templates per neuron.
+  - `test_shapes.png`: Anti-aliased 28×28 test inputs and hardware ReLU scores.
 
-## Nasıl Çalıştırılır?
+![Learned Weight Templates](3_Model_Training_Python/weight_templates.png)
+![Test Shapes and Hardware ReLU Scores](3_Model_Training_Python/test_shapes.png)
 
-### 1. Python ile Model Eğitimi ve `.hex` Üretimi
+## How to Run
+
+### 1. Train Model & Generate `.hex` Files (Python)
 ```bash
-python 3_Model_Egitimi_Python/train_shape_model.py
+python 3_Model_Training_Python/train_shape_model.py
 ```
 
-### 2. Verilog Simülasyonu (Questa / ModelSim veya Icarus Verilog)
-`2_Simulasyon` dizini içinde çalıştırın (`.hex` dosyalarının çalışma dizininde bulunması gerekir):
+### 2. Run Hardware Simulation
+Run inside `2_Simulation/` so `$readmemh` resolves the `.hex` files in the working directory:
 
 **Questa / ModelSim:**
 ```bash
-cd 2_Simulasyon
+cd 2_Simulation
 vlib work
 vlog -work work ../1_Chip_RTL/*.v tb_brute_force.v tb_full_brute_force.v
 vsim -c -lib work -do "run -all; quit -f" tb_full_brute_force
@@ -53,7 +58,7 @@ vsim -c -lib work -do "run -all; quit -f" tb_brute_force
 
 **Icarus Verilog:**
 ```bash
-cd 2_Simulasyon
+cd 2_Simulation
 iverilog -o sim.vvp ../1_Chip_RTL/*.v tb_brute_force.v
 vvp sim.vvp
 ```

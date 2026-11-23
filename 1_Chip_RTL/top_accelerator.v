@@ -6,7 +6,7 @@ module top_accelerator #(
     parameter NUM_NEURONS = 3,
     parameter WEIGHT_FILE = "weights.hex",
     parameter ACT_FILE = "acts.hex",
-    parameter BIAS_FILE = "biases.hex"       // YENİ: Bias dosyası parametresi
+    parameter BIAS_FILE = "biases.hex"       // Bias initialization file
 )(
     input wire clk,
     input wire rst_n,
@@ -27,7 +27,7 @@ module top_accelerator #(
     wire [DATA_WIDTH-1:0] weight_data, act_data;
     wire [ACC_WIDTH-1:0] mac_out;
 
-    // YENİ: FSM'den gelen nöron sayacı (bias adresleme için)
+    // Neuron counter from FSM (used for bias addressing)
     wire [15:0] neuron_count;
 
     control_fsm #(
@@ -40,7 +40,7 @@ module top_accelerator #(
         .mem_en(mem_en), .mac_en(mac_en), .acc_clr(acc_clr),
         .agu_inc(agu_inc), .agu_clr(agu_clr), .relu_en(relu_en),
         .output_valid(output_valid), .done(done),
-        .neuron_count(neuron_count)  // YENİ: Bias adresi
+        .neuron_count(neuron_count)  // Bias address index
     );
 
     agu #(
@@ -71,25 +71,25 @@ module top_accelerator #(
     );
 
     // =========================================================================
-    // YENİ: BIAS BELLEK + TOPLAYICI
-    // Kombinasyonel okuma — saat gerektirmez, adres verilince değer hazır.
-    // Her nöronun dot product sonucuna bias eklenir, sonra ReLU'ya gider.
+    // BIAS MEMORY + ADDER
+    // Combinational read: bias value is ready immediately for current neuron.
+    // Bias is added to each neuron's dot product before ReLU.
     // =========================================================================
     reg signed [ACC_WIDTH-1:0] bias_mem [0:NUM_NEURONS-1];
     initial begin
         $readmemh(BIAS_FILE, bias_mem);
     end
 
-    // Bias'ı mevcut nöron sayacına göre oku (kombinasyonel)
+    // Read bias for the active neuron counter (combinational)
     wire signed [ACC_WIDTH-1:0] current_bias = bias_mem[neuron_count[NEURON_ADDR_WIDTH-1:0]];
 
-    // MAC çıkışına bias ekle: z = (W · x) + b
+    // Add bias to MAC output: z = (W * x) + b
     wire signed [ACC_WIDTH-1:0] mac_plus_bias = $signed(mac_out) + current_bias;
 
-    // ReLU artık bias eklenmiş değeri alıyor
+    // ReLU operates on the biased pre-activation sum
     relu_unit #(.WIDTH(ACC_WIDTH)) relu_inst (
         .clk(clk), .rst_n(rst_n), .relu_en(relu_en),
-        .data_in(mac_plus_bias),  // ESKİ: mac_out → YENİ: mac_out + bias
+        .data_in(mac_plus_bias),
         .data_out(final_result)
     );
 

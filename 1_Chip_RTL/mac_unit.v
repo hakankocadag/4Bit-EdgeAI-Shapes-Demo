@@ -21,18 +21,18 @@ module mac_unit #(
  // Combinational signed multiplier
  assign product = signed_w * signed_a;
 
- // --- Saturation (Doygunluk) Logic ---
- // Explicit Sign-Extension (İşaret Genişletme) to 16 bits
+ // --- Saturation Logic ---
+ // Explicit sign-extension to ACC_WIDTH bits
  wire signed [ACC_WIDTH-1:0] ext_product = {{(ACC_WIDTH - (IN_WIDTH*2)){product[(IN_WIDTH*2)-1]}}, product};
  wire signed [ACC_WIDTH-1:0] sum = $signed(mac_out) + ext_product;
  
- // Taşma (Overflow) tespiti: İki pozitif sayı toplanıp negatif çıkarsa pozitif taşma,
- // iki negatif sayı toplanıp pozitif çıkarsa negatif taşmadır.
+ // Overflow detection: positive+positive=negative -> pos_overflow;
+ // negative+negative=positive -> neg_overflow.
  wire pos_overflow = (~mac_out[ACC_WIDTH-1]) & (~ext_product[ACC_WIDTH-1]) & sum[ACC_WIDTH-1];
  wire neg_overflow = mac_out[ACC_WIDTH-1] & ext_product[ACC_WIDTH-1] & (~sum[ACC_WIDTH-1]);
 
- wire signed [ACC_WIDTH-1:0] MAX_POS = {1'b0, {(ACC_WIDTH-1){1'b1}}}; // 0111...111 (+32767)
- wire signed [ACC_WIDTH-1:0] MAX_NEG = {1'b1, {(ACC_WIDTH-1){1'b0}}}; // 1000...000 (-32768)
+ wire signed [ACC_WIDTH-1:0] MAX_POS = {1'b0, {(ACC_WIDTH-1){1'b1}}};
+ wire signed [ACC_WIDTH-1:0] MAX_NEG = {1'b1, {(ACC_WIDTH-1){1'b0}}};
 
  // Sequential logic for the Accumulator Register
  always @(posedge clk or negedge rst_n) begin
@@ -41,7 +41,7 @@ module mac_unit #(
  end else if (acc_clr) begin
  mac_out <= {ACC_WIDTH{1'b0}}; // Soft reset for next calculation
  end else if (mac_en) begin
- // Saturation (Kırpma) İşlemi
+ // Saturation clamping
  if (pos_overflow)
  mac_out <= MAX_POS;
  else if (neg_overflow)

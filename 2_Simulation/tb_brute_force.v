@@ -25,7 +25,7 @@ module tb_brute_force;
         .predicted_class(predicted_class)
     );
 
-    // 50 MHz saat sinyali (Periyot = 20 ns)
+    // 50 MHz clock signal (Period = 20 ns)
     initial begin
         clk = 0;
         forever #10 clk = ~clk;
@@ -54,8 +54,8 @@ module tb_brute_force;
         #50;
 
         $display("\n==================================================");
-        $display("   4-BIT SEKIL TANIMA TEST SUITE BASLIYOR");
-        $display("   (28x28 = 784 piksel | 00:Kare, 01:Ucgen, 10:Daire)");
+        $display("   4-BIT SHAPE CLASSIFICATION TEST SUITE");
+        $display("   (28x28 = 784 pixels | 00:Square, 01:Triangle, 10:Circle)");
         $display("==================================================\n");
 
         for (i = 1; i <= 6; i = i + 1) begin
@@ -65,22 +65,22 @@ module tb_brute_force;
 
             if (i == 1) begin
                 expected_class = 2'b00;
-                $display("TEST 1: KUSURSUZ KARE (Beklenen: 00)");
+                $display("TEST 1: CLEAN SQUARE (Expected: 00)");
             end else if (i == 2) begin
                 expected_class = 2'b01;
-                $display("TEST 2: KUSURSUZ UCGEN (Beklenen: 01)");
+                $display("TEST 2: CLEAN TRIANGLE (Expected: 01)");
             end else if (i == 3) begin
                 expected_class = 2'b10;
-                $display("TEST 3: KUSURSUZ DAIRE (Beklenen: 10)");
+                $display("TEST 3: CLEAN CIRCLE (Expected: 10)");
             end else if (i == 4) begin
                 expected_class = 2'b00;
-                $display("TEST 4: BOZUK / GURULTULU KARE (Beklenen: 00)");
+                $display("TEST 4: CORRUPTED / NOISY SQUARE (Expected: 00)");
             end else if (i == 5) begin
                 expected_class = 2'b10;
-                $display("TEST 5: GURULTULU VE KAYMIS DAIRE (Beklenen: 10)");
+                $display("TEST 5: NOISY & SHIFTED CIRCLE (Expected: 10)");
             end else if (i == 6) begin
                 expected_class = 2'b01;
-                $display("TEST 6: BOZUK / GURULTULU UCGEN (Beklenen: 01)");
+                $display("TEST 6: CORRUPTED / NOISY TRIANGLE (Expected: 01)");
             end
 
             @(posedge clk);
@@ -91,32 +91,32 @@ module tb_brute_force;
 
             @(posedge done);
             elapsed_ns = $time - start_time;
-            #1; // NBA guncellemesi sonrasi done ile ayni anda aninda okuma
+            #1; // Sample immediately on done rising edge after NBA update
 
             if (predicted_class == 2'b00)
-                $display("--> SONUC: SINIF 00 (KARE) DETECTED! | Sure: %0d ns", elapsed_ns);
+                $display("--> RESULT: CLASS 00 (SQUARE) DETECTED! | Latency: %0d ns", elapsed_ns);
             else if (predicted_class == 2'b01)
-                $display("--> SONUC: SINIF 01 (UCGEN) DETECTED! | Sure: %0d ns", elapsed_ns);
+                $display("--> RESULT: CLASS 01 (TRIANGLE) DETECTED! | Latency: %0d ns", elapsed_ns);
             else if (predicted_class == 2'b10)
-                $display("--> SONUC: SINIF 10 (DAIRE) DETECTED! | Sure: %0d ns", elapsed_ns);
+                $display("--> RESULT: CLASS 10 (CIRCLE) DETECTED! | Latency: %0d ns", elapsed_ns);
             else
-                $display("--> SONUC: GECERSIZ SINIF (%b)! | Sure: %0d ns", predicted_class, elapsed_ns);
+                $display("--> RESULT: INVALID CLASS (%b)! | Latency: %0d ns", predicted_class, elapsed_ns);
 
             if (predicted_class === expected_class) begin
                 pass_count = pass_count + 1;
-                $display("    [PASS] Beklenen sinif ile eslesti.");
+                $display("    [PASS] Matched expected class.");
             end else begin
                 fail_count = fail_count + 1;
-                $display("    [FAIL] Beklenen=%b, Donanim=%b", expected_class, predicted_class);
+                $display("    [FAIL] Expected=%b, Hardware=%b", expected_class, predicted_class);
             end
             $display("--------------------------------------------------\n");
 
-            // FSM'in S_DONE -> S_IDLE gecisi ve argmax sifirlamasi icin bekle
+            // Wait for FSM S_DONE -> S_IDLE transition and argmax internal reset
             #100;
         end
 
         $display("==================================================");
-        $display("  OZET: %0d / 6 TEST BASARILI, %0d HATA", pass_count, fail_count);
+        $display("  SUMMARY: %0d / 6 TESTS PASSED, %0d FAILED", pass_count, fail_count);
         $display("==================================================\n");
         $finish;
     end

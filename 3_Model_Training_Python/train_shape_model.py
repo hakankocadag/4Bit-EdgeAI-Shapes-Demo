@@ -1,15 +1,16 @@
 """
 =============================================================================
-  28x28 4-Bit Sekil Siniflandirici -- Egitim + 4-Bit Kuantizasyon Pipeline'i
-  Siniflar: 0 = Kare (00), 1 = Ucgen (01), 2 = Daire (10)
+  28x28 4-Bit Shape Classifier -- Training & 4-Bit Quantization Pipeline
+  Classes: 0 = Square (00), 1 = Triangle (01), 2 = Circle (10)
 
-  Bu script:
-  1. Sentetik 28x28 (784 piksel) Kare, Ucgen ve Daire egitim/dogrulama verisi uretir
-  2. Tek katmanli dogrusal siniflandirici egitir: y = W * x + b
-  3. Agirliklari 4-bit'e ([-8, +7]), bias'lari 24-bit'e kuantize eder
-  4. Donanimla birebir uyumlu (ReLU + Argmax) Golden Model dogrulamasi yapar
-  5. weights.hex, biases.hex, acts.hex ve test_1..test_5.hex dosyalarini
-     2_Simulasyon/ klasorune yazar
+  This script:
+  1. Generates synthetic 28x28 (784-pixel) Square, Triangle, and Circle datasets
+     using 8x8 supersampled anti-aliasing for smooth sub-pixel edges
+  2. Trains a single-layer linear classifier: y = W * x + b
+  3. Quantizes weights to 4-bit signed ([-8, +7]) and biases to 24-bit signed
+  4. Runs a bit-exact hardware Golden Model check (ReLU + Argmax)
+  5. Writes weights.hex, biases.hex, acts.hex, and test_1..test_6.hex to
+     2_Simulation/ and saves 28x28 PNG visualizations
 =============================================================================
 """
 from pathlib import Path
@@ -18,33 +19,43 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-# --- Sabit Parametreler (Verilog top_accelerator.v ile ayni olmali) ---
+# --- Fixed Hardware Parameters (must match Verilog top_accelerator.v) ---
 IMG_SIZE = 28
 VECTOR_LENGTH = IMG_SIZE * IMG_SIZE  # 784
-NUM_NEURONS = 3                      # 0=Kare, 1=Ucgen, 2=Daire
-ACC_WIDTH = 24                       # Bias ve akkumulator genisligi
+NUM_NEURONS = 3                      # 0=Square, 1=Triangle, 2=Circle
+ACC_WIDTH = 24                       # Bias and accumulator bit-width
 NUM_TRAIN_PER_CLASS = 600
 NUM_VAL_PER_CLASS = 150
 LEARNING_RATE = 0.002
 WEIGHT_DECAY = 1e-3
 EPOCHS = 250
 BATCH_SIZE = 64
-QUANT_SCALE = 7.0                    # [-1.0, +1.0] -> [-7, +7] (4-bit [-8, +7])
+QUANT_SCALE = 7.0                    # [0.0, 1.0] -> [0, +7] (4-bit signed [-8, +7])
+SUBSAMPLE = 8                        # 8x8 supersampling for anti-aliased edges
 
-CLASS_NAMES = ["Kare (00)", "Ucgen (01)", "Daire (10)"]
+CLASS_NAMES = ["Square (00)", "Triangle (01)", "Circle (10)"]
 
 np.random.seed(42)
 
-# 28x28 piksel koordinat izgara matrisleri (x: sutun [0..27], y: satir [0..27])
-GRID_Y, GRID_X = np.mgrid[0:IMG_SIZE, 0:IMG_SIZE]
+# High-resolution 224x224 sub-pixel grid covering [-0.5, 27.5]
+_sub_coords = (np.arange(IMG_SIZE * SUBSAMPLE) + 0.5) / SUBSAMPLE - 0.5
+HR_Y, HR_X = np.meshgrid(_sub_coords, _sub_coords, indexing="ij")
 CENTER = (IMG_SIZE - 1) / 2.0  # 13.5
 
 
 # ============================================================================
-# BOLUM 1: Sentetik 28x28 Sekil Veri Uretimi
+# SECTION 1: Synthetic 28x28 Anti-Aliased Shape Generation
 # ============================================================================
+def _downsample_coverage(hr_mask, amplitude):
+    """Average 8x8 sub-pixels per pixel for smooth anti-aliased coverage."""
+    coverage = hr_mask.astype(float).reshape(
+        IMG_SIZE, SUBSAMPLE, IMG_SIZE, SUBSAMPLE
+    ).mean(axis=(1, 3))
+    return coverage * amplitude
+
+
 def _apply_noise_and_dropout(img, noise_std, dropout_prob):
-    """Goruntuye Gauss gurultusu ve rastgele piksel bozulmasi/eksilmesi uygula."""
+    """Apply optional random pixel corruption and additive Gaussian noise."""
     if dropout_prob > 0.0:
         drop_mask = np.random.rand(IMG_SIZE, IMG_SIZE) < dropout_prob
         corrupt_vals = np.random.uniform(-0.3, 0.3, size=(IMG_SIZE, IMG_SIZE))
@@ -55,18 +66,18 @@ def _apply_noise_and_dropout(img, noise_std, dropout_prob):
 
 
 def generate_square(noise_std=0.15, dropout_prob=0.0, shift=None, half_side=None, amp=None):
-    """28x28 dolu Kare sablonu."""
+    """Generate a 28x28 anti-aliased filled Square."""
     dx, dy = shift if shift is not None else np.random.uniform(-2.0, 2.0, size=2)
     r = half_side if half_side is not None else np.random.uniform(7.0, 10.0)
     fg = amp if amp is not None else np.random.uniform(0.75, 1.0)
     cx, cy = CENTER + dx, CENTER + dy
-    mask = (np.abs(GRID_X - cx) <= r) & (np.abs(GRID_Y - cy) <= r)
-    img = np.where(mask, fg, 0.0)
+    hr_mask = (np.abs(HR_X - cx) <= r) & (np.abs(HR_Y - cy) <= r)
+    img = _downsample_coverage(hr_mask, fg)
     return _apply_noise_and_dropout(img, noise_std, dropout_prob)
 
 
 def generate_triangle(noise_std=0.15, dropout_prob=0.0, shift=None, half_h=None, half_w=None, amp=None):
-    """28x28 yukari bakan dolu ikizkenar Ucgen sablonu."""
+    """Generate a 28x28 anti-aliased upward-pointing filled isosceles Triangle."""
     dx, dy = shift if shift is not None else np.random.uniform(-2.0, 2.0, size=2)
     h = half_h if half_h is not None else np.random.uniform(7.5, 10.5)
     w = half_w if half_w is not None else np.random.uniform(7.5, 10.5)
@@ -74,27 +85,26 @@ def generate_triangle(noise_std=0.15, dropout_prob=0.0, shift=None, half_h=None,
     cx, cy = CENTER + dx, CENTER + dy
     top_y = cy - h
     bot_y = cy + h
-    # Yukseklik boyunca tabana dogru dogrusal genisleyen yari genislik
-    rel_y = (GRID_Y - top_y) / max(bot_y - top_y, 1e-6)
-    mask = (GRID_Y >= top_y) & (GRID_Y <= bot_y) & (np.abs(GRID_X - cx) <= w * rel_y)
-    img = np.where(mask, fg, 0.0)
+    rel_y = (HR_Y - top_y) / max(bot_y - top_y, 1e-6)
+    hr_mask = (HR_Y >= top_y) & (HR_Y <= bot_y) & (np.abs(HR_X - cx) <= w * rel_y)
+    img = _downsample_coverage(hr_mask, fg)
     return _apply_noise_and_dropout(img, noise_std, dropout_prob)
 
 
 def generate_circle(noise_std=0.15, dropout_prob=0.0, shift=None, radius=None, amp=None):
-    """28x28 dolu Daire sablonu."""
+    """Generate a 28x28 anti-aliased filled Circle."""
     dx, dy = shift if shift is not None else np.random.uniform(-2.0, 2.0, size=2)
     r = radius if radius is not None else np.random.uniform(7.0, 10.5)
     fg = amp if amp is not None else np.random.uniform(0.75, 1.0)
     cx, cy = CENTER + dx, CENTER + dy
-    dist2 = (GRID_X - cx) ** 2 + (GRID_Y - cy) ** 2
-    mask = dist2 <= (r ** 2)
-    img = np.where(mask, fg, 0.0)
+    dist2 = (HR_X - cx) ** 2 + (HR_Y - cy) ** 2
+    hr_mask = dist2 <= (r ** 2)
+    img = _downsample_coverage(hr_mask, fg)
     return _apply_noise_and_dropout(img, noise_std, dropout_prob)
 
 
 def build_dataset(per_class):
-    """Her siniftan esit sayida karisik sentetik sekil veri seti olustur."""
+    """Build a balanced, shuffled synthetic dataset across all 3 shape classes."""
     xs, ys = [], []
     for _ in range(per_class):
         drop = np.random.uniform(0.0, 0.15)
@@ -111,28 +121,28 @@ def build_dataset(per_class):
 
 
 def quantize_input_4bit(signal):
-    """Goruntu vektorunu [-8, +7] 4-bit isaretli tamsayiya kuantize et."""
+    """Quantize pixel vector to 4-bit signed integers in [-8, +7]."""
     return np.clip(np.round(signal * QUANT_SCALE), -8, 7).astype(int)
 
 
 # ============================================================================
-# BOLUM 2: Egitim & Dogrulama Verisi ve 4-Bit Kuantizasyon
+# SECTION 2: Dataset Generation & 4-Bit Input Quantization
 # ============================================================================
-print("28x28 sekil egitim ve dogrulama verisi uretiliyor...")
+print("Generating 28x28 anti-aliased shape training and validation datasets...")
 X_train_raw, y_train = build_dataset(NUM_TRAIN_PER_CLASS)
 X_val_raw, y_val = build_dataset(NUM_VAL_PER_CLASS)
 
 X_train_q = quantize_input_4bit(X_train_raw)
 X_val_q = quantize_input_4bit(X_val_raw)
 
-print(f"  Egitim ornek sayisi   : {len(y_train)} (her siniftan {NUM_TRAIN_PER_CLASS})")
-print(f"  Dogrulama ornek sayisi: {len(y_val)} (her siniftan {NUM_VAL_PER_CLASS})")
+print(f"  Training samples  : {len(y_train)} ({NUM_TRAIN_PER_CLASS} per class)")
+print(f"  Validation samples: {len(y_val)} ({NUM_VAL_PER_CLASS} per class)")
 
 
 # ============================================================================
-# BOLUM 3: Dogrusal Siniflandirici Egitimi (NumPy ile Softmax + L2)
+# SECTION 3: Linear Classifier Training (NumPy Softmax + L2 Regularization)
 # ============================================================================
-print("\nModel egitimi basliyor...")
+print("\nTraining linear classifier...")
 
 W = np.random.randn(NUM_NEURONS, VECTOR_LENGTH) * 0.01
 b = np.zeros(NUM_NEURONS)
@@ -195,15 +205,15 @@ for epoch in range(EPOCHS):
         )
 
 float_val_acc = np.mean(np.argmax(X_val_q.astype(float) @ W.T + b, axis=1) == y_val) * 100.0
-print(f"\n  Float Dogrulama Dogrulugu: {float_val_acc:.2f}%")
+print(f"\n  Float Validation Accuracy: {float_val_acc:.2f}%")
 
 
 # ============================================================================
-# BOLUM 4: Agirliklari 4-Bit'e, Bias'lari 24-Bit'e Kuantize Et
+# SECTION 4: Quantize Weights to 4-Bit and Biases to 24-Bit
 # ============================================================================
-# NOT: W ve b zaten 4-bit kuantize X_train_q uzerinde egitildigi icin
-#      W_q * x_q + b_q = round(W_scale * (W * x_q + b)) -> bias yalnizca W_scale ile carpilir!
-print("\nAgirliklar ve biaslar kuantize ediliyor...")
+# NOTE: W and b are trained directly on quantized 4-bit inputs X_train_q, so
+#       W_q * x_q + b_q = round(W_scale * (W * x_q + b)) -> scale bias by W_scale.
+print("\nQuantizing weights and biases...")
 
 W_max = max(np.max(np.abs(W)), 1e-10)
 W_scale = 7.0 / W_max
@@ -213,11 +223,11 @@ max_bias = (1 << (ACC_WIDTH - 1)) - 1
 min_bias = -(1 << (ACC_WIDTH - 1))
 b_q = np.clip(np.round(b * W_scale).astype(int), min_bias, max_bias)
 
-print(f"  Agirlik olcegi (W_scale): {W_scale:.6f}")
+print(f"  Weight scale (W_scale): {W_scale:.6f}")
 
 
 def hw_forward(x_q_batch):
-    """Verilog donanimi ile birebir ayni ileri yayilim: MAC + Bias -> ReLU -> Argmax."""
+    """Bit-exact hardware forward pass: MAC + Bias -> ReLU -> Argmax."""
     raw = x_q_batch @ W_q.T + b_q
     relu = np.maximum(0, raw)
     preds = np.argmax(relu, axis=1)
@@ -229,26 +239,26 @@ _, _, q_val_preds = hw_forward(X_val_q)
 q_train_acc = np.mean(q_train_preds == y_train) * 100.0
 q_val_acc = np.mean(q_val_preds == y_val) * 100.0
 
-print(f"  Kuantize (ReLU+Argmax) Egitim Dogrulugu   : {q_train_acc:.2f}%")
-print(f"  Kuantize (ReLU+Argmax) Dogrulama Dogrulugu: {q_val_acc:.2f}%")
+print(f"  Quantized (ReLU+Argmax) Train Accuracy     : {q_train_acc:.2f}%")
+print(f"  Quantized (ReLU+Argmax) Validation Accuracy: {q_val_acc:.2f}%")
 
 for n in range(NUM_NEURONS):
     print(f"  Neuron {n} ({CLASS_NAMES[n]}): W_q=[{W_q[n].min()}, {W_q[n].max()}], bias_q={b_q[n]}")
 
 
 # ============================================================================
-# BOLUM 5: HEX Dosyalarini 2_Simulasyon/ Dizinine Yaz
+# SECTION 5: Write HEX Files to 2_Simulation/
 # ============================================================================
-sim_dir = Path(__file__).resolve().parent.parent / "2_Simulasyon"
+sim_dir = Path(__file__).resolve().parent.parent / "2_Simulation"
 sim_dir.mkdir(parents=True, exist_ok=True)
-print(f"\nHEX dosyalari olusturuluyor -> {sim_dir}")
+print(f"\nWriting HEX files -> {sim_dir}")
 
 weights_path = sim_dir / "weights.hex"
 with open(weights_path, "w", encoding="ascii") as f:
     for n in range(NUM_NEURONS):
         for v in range(VECTOR_LENGTH):
             f.write(f"{W_q[n][v] & 0xF:X}\n")
-print(f"  weights.hex: {NUM_NEURONS}x{VECTOR_LENGTH} = {NUM_NEURONS * VECTOR_LENGTH} agirlik (4-bit)")
+print(f"  weights.hex: {NUM_NEURONS}x{VECTOR_LENGTH} = {NUM_NEURONS * VECTOR_LENGTH} weights (4-bit)")
 
 hex_digits = ACC_WIDTH // 4
 bias_mask = (1 << ACC_WIDTH) - 1
@@ -259,12 +269,11 @@ with open(biases_path, "w", encoding="ascii") as f:
         f.write(f"{hex_val:0{hex_digits}X}\n")
         print(f"  Bias {n} ({CLASS_NAMES[n]}): {int(b_q[n]):>8d} -> 0x{hex_val:0{hex_digits}X}")
 
-# Bozuk / Gurultulu Kare olusturucu (hem acts.hex hem test_4.hex icin)
+
 def make_corrupted_square():
     sq = generate_square(noise_std=0.22, dropout_prob=0.20, shift=(0.5, -0.5), half_side=8.5, amp=0.9)
-    # Sol ust kosede kismi bozulma (Fikir.pdf: "bozuk bir kare")
     sq_2d = sq.reshape(IMG_SIZE, IMG_SIZE)
-    sq_2d[4:9, 4:9] = 0.0
+    sq_2d[4:9, 4:9] = 0.0  # Partial top-left corner occlusion
     return sq_2d.reshape(-1)
 
 
@@ -273,21 +282,21 @@ acts_q = quantize_input_4bit(acts_signal)
 with open(sim_dir / "acts.hex", "w", encoding="ascii") as f:
     for val in acts_q:
         f.write(f"{val & 0xF:X}\n")
-print(f"  acts.hex   : {VECTOR_LENGTH} piksel (4-bit) -- Varsayilan test: Bozuk Kare")
+print(f"  acts.hex   : {VECTOR_LENGTH} pixels (4-bit) -- Default test: Corrupted Square")
 
 
 # ============================================================================
-# BOLUM 6: Golden Model Dogrulamasi ve 6 Test Senaryosu (test_1..test_6.hex)
+# SECTION 6: Golden Model Verification & 6 Test Scenarios (test_1..test_6.hex)
 # ============================================================================
-print("\n=== GOLDEN MODEL DOGRULAMA (ReLU + Argmax) ===")
+print("\n=== GOLDEN MODEL VERIFICATION (ReLU + Argmax) ===")
 
 test_scenarios = [
-    ("Kusursuz Kare", 0, generate_square(noise_std=0.0, dropout_prob=0.0, shift=(0.0, 0.0), half_side=8.5, amp=1.0)),
-    ("Kusursuz Ucgen", 1, generate_triangle(noise_std=0.0, dropout_prob=0.0, shift=(0.0, 0.0), half_h=9.0, half_w=9.0, amp=1.0)),
-    ("Kusursuz Daire", 2, generate_circle(noise_std=0.0, dropout_prob=0.0, shift=(0.0, 0.0), radius=9.0, amp=1.0)),
-    ("Bozuk / Gurultulu Kare", 0, make_corrupted_square()),
-    ("Gurultulu ve Kaymis Daire", 2, generate_circle(noise_std=0.25, dropout_prob=0.05, shift=(2.0, -2.0), radius=8.5, amp=0.9)),
-    ("Bozuk / Gurultulu Ucgen", 1, generate_triangle(noise_std=0.22, dropout_prob=0.15, shift=(-1.5, 1.0), half_h=8.5, half_w=8.5, amp=0.9)),
+    ("Clean Square", 0, generate_square(noise_std=0.0, dropout_prob=0.0, shift=(0.0, 0.0), half_side=8.5, amp=1.0)),
+    ("Clean Triangle", 1, generate_triangle(noise_std=0.0, dropout_prob=0.0, shift=(0.0, 0.0), half_h=9.0, half_w=9.0, amp=1.0)),
+    ("Clean Circle", 2, generate_circle(noise_std=0.0, dropout_prob=0.0, shift=(0.0, 0.0), radius=9.0, amp=1.0)),
+    ("Corrupted / Noisy Square", 0, make_corrupted_square()),
+    ("Noisy & Shifted Circle", 2, generate_circle(noise_std=0.25, dropout_prob=0.05, shift=(2.0, -2.0), radius=8.5, amp=0.9)),
+    ("Corrupted / Noisy Triangle", 1, generate_triangle(noise_std=0.22, dropout_prob=0.15, shift=(-1.5, 1.0), half_h=8.5, half_w=8.5, amp=0.9)),
 ]
 
 all_passed = True
@@ -298,16 +307,18 @@ for idx, (name, expected_cls, signal) in enumerate(test_scenarios, start=1):
     pred_cls = int(pred[0])
     ok = (pred_cls == expected_cls)
     all_passed = all_passed and ok
-    status = "BASARILI" if ok else "HATA"
+    status = "PASS" if ok else "FAIL"
 
     print(
-        f"  Test {idx}: {name:<28} | Beklenen: {CLASS_NAMES[expected_cls]} | "
-        f"Tahmin: {CLASS_NAMES[pred_cls]} [{status}]"
+        f"  Test {idx}: {name:<28} | Expected: {CLASS_NAMES[expected_cls]} | "
+        f"Predicted: {CLASS_NAMES[pred_cls]} [{status}]"
     )
     print(
-        f"          Ham skorlar : {raw_scores[0].tolist()} | "
-        f"ReLU skorlar: {relu_scores[0].tolist()}"
+        f"          Raw scores  : {raw_scores[0].tolist()} | "
+        f"ReLU scores: {relu_scores[0].tolist()}"
     )
+    if name in ("Clean Triangle", "Clean Circle"):
+        print(f"          Unique 4-bit pixel levels: {np.unique(tq).tolist()}")
 
     test_visual_data.append((idx, name, tq, pred_cls, relu_scores[0].tolist()))
 
@@ -315,23 +326,23 @@ for idx, (name, expected_cls, signal) in enumerate(test_scenarios, start=1):
         for val in tq:
             f.write(f"{val & 0xF:X}\n")
 
-assert all_passed, "Golden model testlerinden en az biri basarisiz oldu!"
-print("\nTum 6/6 Golden Model testi basariyla gecti ve HEX dosyalari yazildi.")
+assert all_passed, "One or more Golden Model tests failed!"
+print("\nAll 6/6 Golden Model tests passed and HEX files were generated.")
 
 
 # ============================================================================
-# BOLUM 7: Sunum ve Rapor Icin 28x28 Gorsellestirmeler (PNG)
+# SECTION 7: 28x28 Visualizations (PNG)
 # ============================================================================
 script_dir = Path(__file__).resolve().parent
 
 fig_w, axes_w = plt.subplots(1, 3, figsize=(11, 3.6), constrained_layout=True)
 for n, ax in enumerate(axes_w):
     im_w = ax.imshow(W_q[n].reshape(IMG_SIZE, IMG_SIZE), cmap="RdBu_r", vmin=-8, vmax=7)
-    ax.set_title(f"Neuron {n}: {CLASS_NAMES[n]}\n(4-bit Agirlik Sablonu)", fontsize=10)
+    ax.set_title(f"Neuron {n}: {CLASS_NAMES[n]}\n(4-bit Weight Template)", fontsize=10)
     ax.set_xticks([])
     ax.set_yticks([])
-fig_w.colorbar(im_w, ax=axes_w, shrink=0.85, label="4-bit Agirlik [-8, +7]")
-fig_w.suptitle("Ogrenilmis 28x28 4-Bit Agirlik Sablonlari", fontsize=12, fontweight="bold")
+fig_w.colorbar(im_w, ax=axes_w, shrink=0.85, label="4-bit Weight [-8, +7]")
+fig_w.suptitle("Learned 28x28 4-Bit Weight Templates", fontsize=12, fontweight="bold")
 weights_png = script_dir / "weight_templates.png"
 fig_w.savefig(weights_png, dpi=150)
 plt.close(fig_w)
@@ -340,15 +351,15 @@ fig_t, axes_t = plt.subplots(2, 3, figsize=(11.5, 7.2), constrained_layout=True)
 for ax, (idx, name, tq, pred_cls, relu_sc) in zip(axes_t.flat, test_visual_data):
     im_t = ax.imshow(tq.reshape(IMG_SIZE, IMG_SIZE), cmap="viridis", vmin=-8, vmax=7)
     ax.set_title(
-        f"Test {idx}: {name}\nTahmin: {CLASS_NAMES[pred_cls]} | ReLU: {relu_sc}",
+        f"Test {idx}: {name}\nPred: {CLASS_NAMES[pred_cls]} | ReLU: {relu_sc}",
         fontsize=9,
     )
     ax.set_xticks([])
     ax.set_yticks([])
-fig_t.colorbar(im_t, ax=axes_t, shrink=0.75, label="4-bit Piksel Degeri [-8, +7]")
-fig_t.suptitle("28x28 4-Bit Test Sekilleri ve Donanim ReLU Skorlari", fontsize=12, fontweight="bold")
+fig_t.colorbar(im_t, ax=axes_t, shrink=0.75, label="4-bit Pixel Value [-8, +7]")
+fig_t.suptitle("28x28 Anti-Aliased 4-Bit Test Shapes & Hardware ReLU Scores", fontsize=12, fontweight="bold")
 tests_png = script_dir / "test_shapes.png"
 fig_t.savefig(tests_png, dpi=150)
 plt.close(fig_t)
 
-print(f"Gorseller olusturuldu:\n  - {weights_png}\n  - {tests_png}")
+print(f"Visualizations saved:\n  - {weights_png}\n  - {tests_png}")

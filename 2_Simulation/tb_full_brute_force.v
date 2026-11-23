@@ -1,14 +1,13 @@
 `timescale 1ns / 1ps
 // ============================================================================
 //  FULL BRUTE-FORCE VERIFICATION TESTBENCH
-//  Her modülü bağımsız test eder + tam sistemi golden model ile karşılaştırır.
-//  Küçük parametrelerle (VL=4, N=3) brute-force yapılabilir.
+//  Independently verifies MAC and ReLU hardware units against a golden model.
 // ============================================================================
 
 module tb_full_brute_force;
 
     // =========================================================================
-    //  BÖLÜM 1: MAC UNIT — BIREBIR ÇARPIM TESTİ (256 çift, her seferinde reset)
+    //  SECTION 1: MAC UNIT -- EXHAUSTIVE MULTIPLICATION TEST (256 PAIRS)
     // =========================================================================
     reg clk;
     initial begin clk = 0; forever #5 clk = ~clk; end
@@ -35,77 +34,72 @@ module tb_full_brute_force;
     );
 
     // --- Test Counters ---
-    integer i, j, k;
+    integer i, j;
     integer mac_errors = 0;
     integer relu_errors = 0;
     integer acc_errors = 0;
-    integer system_errors = 0;
     integer total_tests = 0;
 
     // --- Golden model variables ---
-    integer sw, sa, product_gold;
+    integer product_gold;
 
     initial begin
         $display("\n");
         $display("##########################################################");
         $display("#                                                        #");
         $display("#    FULL BRUTE-FORCE VERIFICATION SUITE                 #");
-        $display("#    Tum modullerin 4-bit brute-force dogrulamasi        #");
+        $display("#    4-bit MAC & ReLU Hardware Verification              #");
         $display("#                                                        #");
         $display("##########################################################\n");
 
         // ==================================================================
-        // TEST 1: MAC — 256 tekil çarpım testi (akümülatör her seferinde sıfır)
+        // TEST 1: MAC -- 256 single multiplications (accumulator cleared each time)
         // ==================================================================
-        $display("=== TEST 1: MAC Tekil Carpim (256 cift) ===================");
+        $display("=== TEST 1: MAC Single Multiplication (256 pairs) ========");
         mac_rst_n = 0; mac_en_sig = 0; mac_acc_clr = 0;
         mac_w = 0; mac_a = 0;
         #20; mac_rst_n = 1; #10;
 
         for (i = -8; i <= 7; i = i + 1) begin
             for (j = -8; j <= 7; j = j + 1) begin
-                // Akümülatörü sıfırla
+                // Clear accumulator
                 mac_acc_clr = 1;
                 @(posedge clk); #1;
                 mac_acc_clr = 0;
 
-                // Girişleri uygula
+                // Apply signed 4-bit inputs
                 mac_w = i[3:0];
                 mac_a = j[3:0];
                 mac_en_sig = 1;
                 @(posedge clk); #1;
                 mac_en_sig = 0;
 
-                // Golden model: signed çarpım
-                // 4-bit two's complement: i ve j zaten signed integer loop'ta
+                // Golden model: signed product
                 product_gold = i * j;
 
                 total_tests = total_tests + 1;
                 if ($signed(mac_result) !== product_gold) begin
-                    $display("[HATA-MAC] W=%0d, A=%0d | Beklenen=%0d, Donanim=%0d",
+                    $display("[ERR-MAC] W=%0d, A=%0d | Expected=%0d, Hardware=%0d",
                              i, j, product_gold, $signed(mac_result));
                     mac_errors = mac_errors + 1;
                 end
             end
         end
         if (mac_errors == 0)
-            $display("[BASARILI] 256/256 tekil carpim DOGRU.\n");
+            $display("[PASS] 256/256 single multiplications CORRECT.\n");
         else
-            $display("[BASARISIZ] %0d/256 carpimda HATA!\n", mac_errors);
+            $display("[FAIL] %0d/256 multiplications FAILED!\n", mac_errors);
 
         // ==================================================================
-        // TEST 2: MAC — Akümülasyon + Saturation (Doygunluk) Testi
+        // TEST 2: MAC -- Accumulation + Saturation Logic
         // ==================================================================
-        $display("=== TEST 2: MAC Akumulasyon + Saturation ==================");
+        $display("=== TEST 2: MAC Accumulation + Saturation ================");
         begin : acc_test
             integer acc_gold;
             integer temp_sum2;
-            integer test_w [0:15];
-            integer test_a [0:15];
             integer n;
 
-            // Senaryo A: Pozitif taşma testi — 7*7 = 49, 16 kez toplanır = 784
-            // (16-bit sınırı 32767, bu taşmaz ama test eder)
+            // Scenario A: Normal accumulation -- 16 * (7 * 7) = 784
             mac_acc_clr = 1; @(posedge clk); #1; mac_acc_clr = 0;
             acc_gold = 0;
             for (n = 0; n < 16; n = n + 1) begin
@@ -118,13 +112,13 @@ module tb_full_brute_force;
             end
             total_tests = total_tests + 1;
             if ($signed(mac_result) !== acc_gold) begin
-                $display("[HATA-ACC] Senaryo A: Beklenen=%0d, Donanim=%0d", acc_gold, $signed(mac_result));
+                $display("[ERR-ACC] Scenario A: Expected=%0d, Hardware=%0d", acc_gold, $signed(mac_result));
                 acc_errors = acc_errors + 1;
             end else begin
-                $display("[OK] Senaryo A: 16x(7*7) = %0d, Donanim=%0d", acc_gold, $signed(mac_result));
+                $display("[OK] Scenario A: 16x(7*7) = %0d, Hardware=%0d", acc_gold, $signed(mac_result));
             end
 
-            // Senaryo B: Pozitif taşma — 7*7=49 tekrar edilerek 32767'yi geç
+            // Scenario B: Positive saturation -- accumulate 7*7=49 past +32767
             mac_acc_clr = 1; @(posedge clk); #1; mac_acc_clr = 0;
             acc_gold = 0;
             for (n = 0; n < 700; n = n + 1) begin
@@ -139,13 +133,13 @@ module tb_full_brute_force;
             end
             total_tests = total_tests + 1;
             if ($signed(mac_result) !== acc_gold) begin
-                $display("[HATA-ACC] Senaryo B (Pozitif Tasma): Beklenen=%0d, Donanim=%0d", acc_gold, $signed(mac_result));
+                $display("[ERR-ACC] Scenario B (Pos Saturation): Expected=%0d, Hardware=%0d", acc_gold, $signed(mac_result));
                 acc_errors = acc_errors + 1;
             end else begin
-                $display("[OK] Senaryo B: Pozitif saturation = %0d", $signed(mac_result));
+                $display("[OK] Scenario B: Positive saturation = %0d", $signed(mac_result));
             end
 
-            // Senaryo C: Negatif taşma — (-8)*7=-56 tekrar edilerek -32768'i geç
+            // Scenario C: Negative saturation -- accumulate (-8)*7=-56 past -32768
             mac_acc_clr = 1; @(posedge clk); #1; mac_acc_clr = 0;
             acc_gold = 0;
             for (n = 0; n < 700; n = n + 1) begin
@@ -160,17 +154,16 @@ module tb_full_brute_force;
             end
             total_tests = total_tests + 1;
             if ($signed(mac_result) !== acc_gold) begin
-                $display("[HATA-ACC] Senaryo C (Negatif Tasma): Beklenen=%0d, Donanim=%0d", acc_gold, $signed(mac_result));
+                $display("[ERR-ACC] Scenario C (Neg Saturation): Expected=%0d, Hardware=%0d", acc_gold, $signed(mac_result));
                 acc_errors = acc_errors + 1;
             end else begin
-                $display("[OK] Senaryo C: Negatif saturation = %0d", $signed(mac_result));
+                $display("[OK] Scenario C: Negative saturation = %0d", $signed(mac_result));
             end
 
-            // Senaryo D: Karışık toplam — pozitif ve negatif ürünler sırayla
+            // Scenario D: Mixed accumulation -- alternating +49 and -56
             mac_acc_clr = 1; @(posedge clk); #1; mac_acc_clr = 0;
             acc_gold = 0;
             for (n = 0; n < 100; n = n + 1) begin
-                // Sırayla 7*7=49 ve (-8)*7=-56 toplanacak
                 if (n % 2 == 0) begin
                     mac_w = 4'sd7; mac_a = 4'sd7;
                     mac_en_sig = 1;
@@ -190,22 +183,22 @@ module tb_full_brute_force;
             end
             total_tests = total_tests + 1;
             if ($signed(mac_result) !== acc_gold) begin
-                $display("[HATA-ACC] Senaryo D (Karisik): Beklenen=%0d, Donanim=%0d", acc_gold, $signed(mac_result));
+                $display("[ERR-ACC] Scenario D (Mixed): Expected=%0d, Hardware=%0d", acc_gold, $signed(mac_result));
                 acc_errors = acc_errors + 1;
             end else begin
-                $display("[OK] Senaryo D: Karisik toplam = %0d", $signed(mac_result));
+                $display("[OK] Scenario D: Mixed accumulation = %0d", $signed(mac_result));
             end
         end
 
         if (acc_errors == 0)
-            $display("[BASARILI] Tum akumulasyon/saturation senaryolari DOGRU.\n");
+            $display("[PASS] All accumulation/saturation scenarios CORRECT.\n");
         else
-            $display("[BASARISIZ] %0d akumulasyon hata(lari)!\n", acc_errors);
+            $display("[FAIL] %0d accumulation error(s)!\n", acc_errors);
 
         // ==================================================================
-        // TEST 3: ReLU — Tüm 16-bit aralığında seçilmiş değerler
+        // TEST 3: ReLU -- Selected boundary and signed values
         // ==================================================================
-        $display("=== TEST 3: ReLU Unit Testi ===============================");
+        $display("=== TEST 3: ReLU Unit Test ===============================");
         relu_rst_n = 0; relu_en_sig = 0; relu_din = 0;
         #20; relu_rst_n = 1; #10;
 
@@ -237,32 +230,32 @@ module tb_full_brute_force;
 
                 total_tests = total_tests + 1;
                 if ($signed(relu_dout) !== expected_relu) begin
-                    $display("[HATA-RELU] Giris=%0d | Beklenen=%0d, Donanim=%0d",
+                    $display("[ERR-RELU] Input=%0d | Expected=%0d, Hardware=%0d",
                              relu_test_vals[r], expected_relu, $signed(relu_dout));
                     relu_errors = relu_errors + 1;
                 end
             end
         end
         if (relu_errors == 0)
-            $display("[BASARILI] 10/10 ReLU testi DOGRU.\n");
+            $display("[PASS] 10/10 ReLU tests CORRECT.\n");
         else
-            $display("[BASARISIZ] %0d/10 ReLU hata(lari)!\n", relu_errors);
+            $display("[FAIL] %0d/10 ReLU error(s)!\n", relu_errors);
 
         // ==================================================================
-        // SONUÇ RAPORU
+        // FINAL SUMMARY REPORT
         // ==================================================================
         $display("##########################################################");
-        $display("#  GENEL RAPOR                                           #");
+        $display("#  SUMMARY REPORT                                        #");
         $display("##########################################################");
-        $display("  Toplam Test     : %0d", total_tests);
-        $display("  MAC Carpim Hata : %0d / 256", mac_errors);
-        $display("  MAC Akumul Hata : %0d / 4", acc_errors);
-        $display("  ReLU Hata       : %0d / 10", relu_errors);
+        $display("  Total Tests        : %0d", total_tests);
+        $display("  MAC Mult Errors    : %0d / 256", mac_errors);
+        $display("  MAC Accum Errors   : %0d / 4", acc_errors);
+        $display("  ReLU Errors        : %0d / 10", relu_errors);
         $display("  --------------------------------------------------");
         if (mac_errors == 0 && acc_errors == 0 && relu_errors == 0)
-            $display("  >>> TUMU BASARILI! DONANIM KUSURSUZ CALISIYOR! <<<");
+            $display("  >>> ALL PASSED! HARDWARE VERIFIED SUCCESSFULLY! <<<");
         else
-            $display("  >>> HATALAR MEVCUT! YUKARIDAKI LOGLARA BAKIN! <<<");
+            $display("  >>> FAILURES DETECTED! CHECK LOGS ABOVE! <<<");
         $display("##########################################################\n");
         $finish;
     end

@@ -16,7 +16,7 @@ module control_fsm #(
     output reg relu_en,
     output reg output_valid,
     output reg done,
-    output wire [15:0] neuron_count  // Bias adresleme için nöron sayacı
+    output wire [15:0] neuron_count  // Neuron counter for bias addressing
 );
     localparam S_IDLE       = 6'b000001;
     localparam S_FETCH      = 6'b000010;
@@ -28,7 +28,7 @@ module control_fsm #(
     reg [5:0] current_state, next_state;
     reg [15:0] internal_neuron_count;
     
-    // internal_neuron_count'u dışarı aç (bias bellek adresi olarak kullanılacak)
+    // Expose internal_neuron_count as the bias memory address
     assign neuron_count = internal_neuron_count;
 
     always @(posedge clk or negedge rst_n) begin
